@@ -1,6 +1,9 @@
 import { Effect, Layer } from "effect"
-import { readFile, readdir } from "node:fs/promises"
-import { resolve, join } from "node:path"
+import { readFile, readdir, access } from "node:fs/promises"
+import { resolve, join, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 import { LLMLayer } from "./services/LLM.js"
 import { GateRegistryLayer } from "./services/GateRegistry.js"
 import { ToolRegistryLayer } from "./services/Tools.js"
@@ -132,6 +135,32 @@ const main = async () => {
     return
   }
 
+  // skill shortcuts: gates <skill-name> "issue description" [key=value ...]
+  const skillShortcut = join(__dirname, "..", "skills", cmd ?? "", "skill.yaml")
+  if (cmd && (await access(skillShortcut).then(() => true).catch(() => false))) {
+    const issue = rest[0] ?? ""
+    const kvArgs = issue.includes("=") ? rest : [`issue=${issue}`, ...rest.slice(1)]
+    const jsonMode = kvArgs.includes("--json")
+    const filteredKvArgs = kvArgs.filter(a => a !== "--json")
+    const inputs = parseKvArgs(filteredKvArgs)
+    const systemPrompt = await loadContext()
+    const effect = runSkill(resolve(skillShortcut), inputs, systemPrompt).pipe(
+      Effect.tap((results) =>
+        Effect.sync(() => {
+          const states = Object.keys(results)
+          const last = states[states.length - 1]
+          if (last) {
+            if (jsonMode) process.stdout.write(JSON.stringify(results[last]?.output) + "\n")
+            else console.log(JSON.stringify(results[last]?.output, null, 2))
+          }
+        })
+      ),
+      Effect.provide(AppLayer)
+    )
+    await Effect.runPromise(effect)
+    return
+  }
+
   if (cmd === "run") {
     const [skillPath, ...kvArgs] = rest
     if (!skillPath) {
@@ -163,11 +192,32 @@ const main = async () => {
   }
 
   const prompt = cmd ? [cmd, ...rest].join(" ") : ""
-  if (!prompt) {
-    console.log(
-      "Usage:\n  gates <prompt>\n  gates run <skill.yaml> [key=value ...]\n  gates stats\n  gates auth set <key>\n  gates auth show\n  gates auth remove"
-    )
-    process.exit(1)
+  if (!prompt || cmd === "--help" || cmd === "help") {
+    const skillsDir = join(__dirname, "..", "skills")
+    const skills = await readdir(skillsDir).catch(() => [] as string[])
+    const skillList = skills.map(s => `  gates ${s} "<issue description>"`).join("\n")
+    console.log(`
+gates — autonomous coding agent
+
+USAGE
+  gates <prompt>                        run the agent with a direct prompt
+  gates <skill> "<description>"         run a skill (shortcut)
+  gates run <skill.yaml> [key=value .]  run a skill by path
+  gates stats                           show token usage and cost per run
+  gates auth set <key>                  save Anthropic API key
+  gates auth show                       show stored key (masked)
+  gates auth remove                     delete stored key
+  gates help                            show this message
+
+SKILLS${skillList ? "\n" + skillList : "  (none installed)"}
+
+EXAMPLES
+  gates "list all TypeScript files in src/"
+  gates solve-issue "add a --verbose flag to the CLI"
+  gates run skills/solve-issue/skill.yaml issue="fix the grep tool timeout"
+  gates stats
+    `.trim())
+    process.exit(prompt ? 0 : 1)
   }
 
   await Effect.runPromise(await runAgent(prompt))
