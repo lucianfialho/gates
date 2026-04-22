@@ -89,15 +89,19 @@ const runStats = async () => {
   for (const file of files) {
     const lines = (await readFile(join(runsDir, file), "utf-8")).split("\n").filter(Boolean)
     const parsed = lines.map((l) => { try { return JSON.parse(l) as Record<string, unknown> } catch { return null } }).filter(Boolean)
-    const start = parsed.find((e) => e!.type === "run_start") as { prompt: string; ts: string } | undefined
+    const start = parsed.find((e) => e!.type === "run_start") as { prompt: string; ts: string; parentRunId?: string } | undefined
     const complete = parsed.find((e) => e!.type === "run_complete") as { total_input_tokens: number; total_output_tokens: number } | undefined
     if (!start || !complete) continue
+    if (start.parentRunId) continue  // sub-run of a skill — skip, already counted in parent
     const tin = Number(complete.total_input_tokens) || 0
     const tout = Number(complete.total_output_tokens) || 0
     if (tin === 0 && tout === 0) continue
     // Sonnet 4.6: $3/MTok in, $15/MTok out
     const cost = (tin / 1_000_000) * 3 + (tout / 1_000_000) * 15
-    rows.push({ ts: start.ts, prompt: start.prompt.slice(0, 55).replace(/\n/g, " "), tin, tout, cost })
+    const label = start.prompt.startsWith("skill:")
+      ? (start.prompt.split(" inputs:")[0] ?? start.prompt)
+      : start.prompt.slice(0, 55).replace(/\n/g, " ")
+    rows.push({ ts: start.ts, prompt: label, tin, tout, cost })
   }
 
   rows.sort((a, b) => a.ts.localeCompare(b.ts))

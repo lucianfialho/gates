@@ -55,14 +55,15 @@ export interface RunResult {
 
 export const run = (
   prompt: string,
-  systemPrompt?: string
+  systemPrompt?: string,
+  parentRunId?: string
 ): Effect.Effect<RunResult, AgentError | GateError, RunDeps> =>
   Effect.gen(function* () {
     const llm = yield* LLMService
     const tools = yield* ToolRegistry
     const persistence = yield* Persistence
 
-    const runId = yield* persistence.initRun(prompt)
+    const runId = yield* persistence.initRun(prompt, parentRunId)
 
     const messagesRef = yield* Ref.make<Message[]>([
       { role: "user" as const, content: prompt },

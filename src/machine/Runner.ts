@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises"
 import { join, dirname } from "node:path"
 import { loadSkill, interpolate, resolveTransition, type Skill, SkillError } from "./Skill.js"
 import { Persistence } from "./Persistence.js"
-import { run as runAgent } from "../agent/Loop.js"
+import { run as runAgent, type RunResult } from "../agent/Loop.js"
 import { LLMService } from "../services/LLM.js"
 import { GateRegistry } from "../services/GateRegistry.js"
 import { ToolRegistry } from "../services/Tools.js"
@@ -87,7 +87,7 @@ export const runSkill = (
       })
 
       // Run the agent for this state
-      const { text: agentText, usage } = yield* runAgent(fullPrompt, systemContext).pipe(
+      const { text: agentText, usage } = yield* runAgent(fullPrompt, systemContext, runId).pipe(
         Effect.mapError((e) => e instanceof RunnerError ? e : new RunnerError(`Agent failed in state ${currentState}`, e))
       )
       totalInput += usage.input_tokens
