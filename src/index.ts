@@ -58,7 +58,7 @@ const runAuth = (args: string[]) =>
 const runAgent = async (prompt: string) => {
   const systemPrompt = await loadContext()
   return run(prompt, systemPrompt).pipe(
-    Effect.tap((result) => Effect.sync(() => console.log(result))),
+    Effect.tap((result) => Effect.sync(() => console.log(result || "(task completed — agent returned no text)"))),
     Effect.provide(AppLayer)
   )
 }

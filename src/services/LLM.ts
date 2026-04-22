@@ -58,7 +58,7 @@ const makeImpl: Effect.Effect<LLMShape, never, Auth> = Effect.gen(function* () {
     Effect.tryPromise({
       try: () =>
         client.messages.create({
-          model: "claude-opus-4-7",
+          model: "claude-sonnet-4-6",
           max_tokens: 8096,
           ...(system ? { system } : {}),
           tools: tools.map((t) => ({

@@ -2,6 +2,7 @@ import { Context, Effect, Layer } from "effect"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { readFile, writeFile } from "node:fs/promises"
+import { glob as fsGlob } from "node:fs/promises"
 import type { ToolDef } from "./LLM.js"
 
 const execFileAsync = promisify(execFile)
@@ -80,11 +81,26 @@ const edit: ToolHandler = (id, input) =>
     catch: (e) => new ToolError("edit", e),
   })
 
+const glob: ToolHandler = (id, input) =>
+  Effect.tryPromise({
+    try: async () => {
+      const { pattern, cwd } = input as { pattern: string; cwd?: string }
+      const matches: string[] = []
+      for await (const file of fsGlob(pattern, { cwd: cwd ?? "." })) {
+        matches.push(file)
+      }
+      matches.sort()
+      return { id, content: matches.length > 0 ? matches.join("\n") : "(no matches)" }
+    },
+    catch: (e) => new ToolError("glob", e),
+  })
+
 const handlers = new Map<string, ToolHandler>([
   ["bash", bash],
   ["read", read],
   ["write", write],
   ["edit", edit],
+  ["glob", glob],
 ])
 
 const definitions: ToolDef[] = [
@@ -129,6 +145,24 @@ const definitions: ToolDef[] = [
         new_string: { type: "string" },
       },
       required: ["path", "old_string", "new_string"],
+    },
+  },
+  {
+    name: "glob",
+    description: "List files matching a glob pattern. Returns a sorted newline-separated list of matching paths, or '(no matches)' if none found.",
+    input_schema: {
+      type: "object",
+      properties: {
+        pattern: {
+          type: "string",
+          description: "Glob pattern, e.g. 'src/**/*.ts' or '**/*.json'",
+        },
+        cwd: {
+          type: "string",
+          description: "Directory to search from. Defaults to '.' (current working directory).",
+        },
+      },
+      required: ["pattern"],
     },
   },
 ]
