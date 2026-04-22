@@ -34,9 +34,9 @@ export class ToolRegistry extends Context.Service<ToolRegistry, ToolRegistryShap
 const bash: ToolHandler = (id, input) =>
   Effect.tryPromise({
     try: async () => {
-      const { command } = input as { command: string }
+      const { command, timeout = 30_000 } = input as { command: string; timeout?: number }
       const { stdout, stderr } = await execFileAsync("bash", ["-c", command], {
-        timeout: 30_000,
+        timeout,
       })
       return { id, content: stdout + (stderr ? `\nSTDERR: ${stderr}` : "") }
     },
@@ -161,7 +161,10 @@ const definitions: ToolDef[] = [
     description: "Run a shell command",
     input_schema: {
       type: "object",
-      properties: { command: { type: "string" } },
+      properties: {
+        command: { type: "string" },
+        timeout: { type: "number", description: "Timeout in milliseconds. Defaults to 30000." },
+      },
       required: ["command"],
     },
   },
