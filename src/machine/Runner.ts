@@ -35,9 +35,15 @@ const loadOutputSchema = async (
 }
 
 const extractJSON = (text: string): unknown | null => {
-  const match = /```json\s*([\s\S]+?)\s*```|(\{[\s\S]+\})/.exec(text)
-  if (!match) return null
-  try { return JSON.parse((match[1] ?? match[2])!) } catch { return null }
+  const fenced = /```json\s*([\s\S]+?)\s*```/.exec(text)
+  if (fenced) {
+    try { return JSON.parse(fenced[1]!) } catch { return null }
+  }
+  const raw = /(\{[\s\S]+\})/.exec(text)
+  if (raw) {
+    try { return JSON.parse(raw[1]!) } catch { return null }
+  }
+  return null
 }
 
 export const runSkill = (
