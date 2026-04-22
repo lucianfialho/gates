@@ -1,0 +1,2 @@
+{"type":"run_start","runId":"57730cd2-7a71-4259-9123-27a03a0957dd","prompt":"add a glob tool to\n  src/services/Tools.ts that lists files matching a\n  pattern. Use node:fs glob or fast-glob.","ts":"2026-04-22T15:18:33.843Z"}
+{"type":"llm_request","messages":[{"role":"user","content":"add a glob tool to\n  src/services/Tools.ts that lists files matching a\n  pattern. Use node:fs glob or fast-glob."}],"ts":"2026-04-22T15:18:33.845Z"}
