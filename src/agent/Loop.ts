@@ -40,7 +40,9 @@ const executeToolCalls = (
           ),
           Effect.andThen(
             tools.execute(call.id, call.name, call.input).pipe(
-              Effect.mapError((e: ToolError) => new AgentError(e.cause))
+              Effect.catchTag("ToolError", (e: ToolError) =>
+                Effect.succeed({ id: call.id, content: `Error: ${e.cause instanceof Error ? e.cause.message : String(e.cause)}` })
+              )
             )
           )
         ),
