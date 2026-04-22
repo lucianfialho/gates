@@ -10,10 +10,10 @@ import type { ToolResult } from "../services/Tools.js"
 export type RunEvent =
   | { type: "run_start"; runId: string; prompt: string; ts: string }
   | { type: "llm_request"; messages: Message[]; ts: string }
-  | { type: "llm_response"; stop_reason: string | null; tool_calls: ToolCall[]; ts: string }
+  | { type: "llm_response"; stop_reason: string | null; tool_calls: ToolCall[]; usage: { input_tokens: number; output_tokens: number }; ts: string }
   | { type: "gate_block"; gate: string; reason: string; call: ToolCall; ts: string }
   | { type: "tool_result"; results: ToolResult[]; ts: string }
-  | { type: "run_complete"; result: string; ts: string }
+  | { type: "run_complete"; result: string; total_input_tokens: number; total_output_tokens: number; ts: string }
   | { type: "run_failed"; error: string; ts: string }
 
 export interface PersistenceShape {

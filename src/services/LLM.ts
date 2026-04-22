@@ -23,6 +23,7 @@ export interface LLMResponse {
   stop_reason: Anthropic.Message["stop_reason"]
   content: Anthropic.ContentBlock[]
   tool_calls: ToolCall[]
+  usage: { input_tokens: number; output_tokens: number }
 }
 
 export interface LLMShape {
@@ -85,6 +86,7 @@ const makeImpl: Effect.Effect<LLMShape, never, Auth> = Effect.gen(function* () {
       Effect.map((res) => ({
         stop_reason: res.stop_reason,
         content: res.content,
+        usage: { input_tokens: res.usage.input_tokens, output_tokens: res.usage.output_tokens },
         tool_calls: res.content
           .filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use")
           .map((b) => ({ id: b.id, name: b.name, input: b.input })),

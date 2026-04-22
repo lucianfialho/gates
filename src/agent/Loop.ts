@@ -63,6 +63,7 @@ export const run = (
       { role: "user" as const, content: prompt },
     ])
     const resultRef = yield* Ref.make<string | null>(null)
+    const usageRef = yield* Ref.make({ input_tokens: 0, output_tokens: 0 })
 
     let done = false
 
@@ -82,10 +83,16 @@ export const run = (
             .complete(messages, tools.definitions, systemPrompt)
             .pipe(Effect.mapError((e) => new AgentError(e.cause)))
 
+          yield* Ref.update(usageRef, (u) => ({
+            input_tokens: u.input_tokens + response.usage.input_tokens,
+            output_tokens: u.output_tokens + response.usage.output_tokens,
+          }))
+
           yield* persistence.record(runId, {
             type: "llm_response",
             stop_reason: response.stop_reason,
             tool_calls: response.tool_calls,
+            usage: response.usage,
             ts: now(),
           })
 
@@ -102,11 +109,17 @@ export const run = (
             const last = response.content.find((b) => b.type === "text")
             const result = last?.type === "text" ? last.text : ""
             yield* Ref.set(resultRef, result)
+            const totalUsage = yield* Ref.get(usageRef)
             yield* persistence.record(runId, {
               type: "run_complete",
               result,
+              total_input_tokens: totalUsage.input_tokens,
+              total_output_tokens: totalUsage.output_tokens,
               ts: now(),
             })
+            console.error(
+              `[gates] tokens: ${totalUsage.input_tokens} in / ${totalUsage.output_tokens} out`
+            )
             done = true
             return
           }
