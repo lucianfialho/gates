@@ -18,6 +18,8 @@ export interface StateDef {
   output_schema?: string  // path to JSON Schema file (relative to skill dir)
   terminal?: boolean
   transitions?: Transition[]
+  on_error?: "retry" | "skip" | "abort"  // default: abort
+  max_retries?: number  // used when on_error = retry, default 2
 }
 
 export interface Skill {

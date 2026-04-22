@@ -95,12 +95,64 @@ const glob: ToolHandler = (id, input) =>
     catch: (e) => new ToolError("glob", e),
   })
 
+const grep: ToolHandler = (id, input) =>
+  Effect.tryPromise({
+    try: async () => {
+      const { pattern, path, case_sensitive = true } = input as {
+        pattern: string
+        path: string
+        case_sensitive?: boolean
+      }
+      const flag = case_sensitive ? "" : "-i"
+      const { stdout } = await execFileAsync(
+        "grep",
+        ["-rn", "--include=*", flag, pattern, path].filter(Boolean),
+        { timeout: 15_000 }
+      ).catch((e: { stdout?: string; code?: number }) => {
+        if (e.code === 1) return { stdout: "" }  // no matches — not an error
+        throw e
+      })
+      return {
+        id,
+        content: stdout.trim() || "(no matches)",
+      }
+    },
+    catch: (e) => new ToolError("grep", e),
+  })
+
+const fetch_url: ToolHandler = (id, input) =>
+  Effect.tryPromise({
+    try: async () => {
+      const { url, method = "GET", body, headers: extraHeaders } = input as {
+        url: string
+        method?: string
+        body?: string
+        headers?: Record<string, string>
+      }
+      const res = await fetch(url, {
+        method,
+        body: body ?? undefined,
+        headers: {
+          "User-Agent": "gates/0.1.0",
+          ...(extraHeaders ?? {}),
+        },
+        signal: AbortSignal.timeout(30_000),
+      })
+      const text = await res.text()
+      const truncated = text.length > 20_000 ? text.slice(0, 20_000) + "\n[truncated]" : text
+      return { id, content: `HTTP ${res.status} ${res.statusText}\n\n${truncated}` }
+    },
+    catch: (e) => new ToolError("fetch", e),
+  })
+
 const handlers = new Map<string, ToolHandler>([
   ["bash", bash],
   ["read", read],
   ["write", write],
   ["edit", edit],
   ["glob", glob],
+  ["grep", grep],
+  ["fetch", fetch_url],
 ])
 
 const definitions: ToolDef[] = [
@@ -163,6 +215,37 @@ const definitions: ToolDef[] = [
         },
       },
       required: ["pattern"],
+    },
+  },
+  {
+    name: "grep",
+    description: "Search for a pattern in files using grep. Returns matching lines with file path and line number.",
+    input_schema: {
+      type: "object",
+      properties: {
+        pattern: { type: "string", description: "Regex or string to search for" },
+        path: { type: "string", description: "File or directory to search in" },
+        case_sensitive: { type: "boolean", description: "Case sensitive search. Defaults to true." },
+      },
+      required: ["pattern", "path"],
+    },
+  },
+  {
+    name: "fetch",
+    description: "Make an HTTP request. Returns the status code and response body (truncated at 20k chars).",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "URL to fetch" },
+        method: { type: "string", description: "HTTP method. Defaults to GET." },
+        body: { type: "string", description: "Request body (for POST/PUT)" },
+        headers: {
+          type: "object",
+          description: "Additional request headers",
+          additionalProperties: { type: "string" },
+        },
+      },
+      required: ["url"],
     },
   },
 ]

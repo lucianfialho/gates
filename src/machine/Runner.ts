@@ -66,7 +66,6 @@ export const runSkill = (
 
       if (stateDef.terminal) break
 
-      // Build the prompt for this state
       const statePrompt = interpolate(stateDef.agent_prompt, {
         inputs,
         outputs: Object.fromEntries(
@@ -86,14 +85,12 @@ export const runSkill = (
         ts: new Date().toISOString(),
       })
 
-      // Run the agent for this state
       const { text: agentText, usage } = yield* runAgent(fullPrompt, systemContext, runId).pipe(
         Effect.mapError((e) => e instanceof RunnerError ? e : new RunnerError(`Agent failed in state ${currentState}`, e))
       )
       totalInput += usage.input_tokens
       totalOutput += usage.output_tokens
 
-      // Parse output if schema defined
       let output: unknown = { result: agentText }
       if (stateDef.output_schema) {
         const parsed = extractJSON(agentText)
@@ -104,7 +101,6 @@ export const runSkill = (
 
       console.error(`[gates] state: ${currentState} → `, JSON.stringify(output).slice(0, 120))
 
-      // Determine next state
       const stateNames = Object.keys(skill.states)
       const currentIdx = stateNames.indexOf(currentState)
       const nextLinear = stateNames[currentIdx + 1]
