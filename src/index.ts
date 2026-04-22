@@ -85,14 +85,22 @@ const main = async () => {
       console.error("Usage: gates run <skill.yaml> [key=value ...]")
       process.exit(1)
     }
-    const inputs = parseKvArgs(kvArgs)
+    const jsonMode = kvArgs.includes('--json')
+    const filteredKvArgs = kvArgs.filter(a => a !== '--json')
+    const inputs = parseKvArgs(filteredKvArgs)
     const systemPrompt = await loadContext()
     const effect = runSkill(resolve(skillPath), inputs, systemPrompt).pipe(
       Effect.tap((results) =>
         Effect.sync(() => {
           const states = Object.keys(results)
           const last = states[states.length - 1]
-          if (last) console.log(JSON.stringify(results[last]?.output, null, 2))
+          if (last) {
+            if (jsonMode) {
+              process.stdout.write(JSON.stringify(results[last]?.output) + '\n')
+            } else {
+              console.log(JSON.stringify(results[last]?.output, null, 2))
+            }
+          }
         })
       ),
       Effect.provide(AppLayer)
