@@ -1,20 +1,7 @@
 import { Context, Effect, Layer } from "effect"
 import Anthropic from "@anthropic-ai/sdk"
 import type { ToolCall } from "../gates/Gate.js"
-
-const requireApiKey = (): string => {
-  const key = process.env["ANTHROPIC_API_KEY"]
-  if (!key) {
-    console.error(
-      "\nError: ANTHROPIC_API_KEY is required.\n" +
-      "The Claude Code OAuth token cannot be used with the Anthropic API directly.\n" +
-      "Get a key at https://console.anthropic.com/settings/keys\n" +
-      "Then: export ANTHROPIC_API_KEY=sk-ant-...\n"
-    )
-    process.exit(1)
-  }
-  return key
-}
+import { Auth } from "../auth/Auth.js"
 
 export class LLMError {
   readonly _tag = "LLMError"
@@ -50,8 +37,18 @@ export class LLMService extends Context.Service<LLMService, LLMShape>()(
   "gates/LLMService"
 ) {}
 
-const makeImpl: Effect.Effect<LLMShape> = Effect.sync(() => {
-  const client = new Anthropic({ apiKey: requireApiKey() })
+const makeImpl: Effect.Effect<LLMShape, never, Auth> = Effect.gen(function* () {
+  const auth = yield* Auth
+  const apiKey = yield* auth.getApiKey()
+  if (!apiKey) {
+    console.error(
+      "\nNo API key found. Run: gates auth set sk-ant-...\n" +
+      "Or set ANTHROPIC_API_KEY env var.\n" +
+      "Get a key at https://console.anthropic.com/settings/keys\n"
+    )
+    process.exit(1)
+  }
+  const client = new Anthropic({ apiKey })
 
   const complete = (
     messages: Message[],
@@ -97,4 +94,8 @@ const makeImpl: Effect.Effect<LLMShape> = Effect.sync(() => {
   return { complete }
 })
 
-export const LLMLayer = Layer.effect(LLMService)(makeImpl)
+export const LLMLayer = Layer.effect(LLMService)(makeImpl).pipe(
+  Layer.provide(AuthLayer)
+)
+
+import { AuthLayer } from "../auth/Auth.js"
