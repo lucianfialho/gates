@@ -42,7 +42,8 @@ const extractJSON = (text: string): unknown | null => {
 export const runSkill = (
   skillPath: string,
   inputs: Record<string, string> = {},
-  systemContext?: string
+  systemContext?: string,
+  verbose?: boolean
 ): Effect.Effect<Record<string, StateResult>, RunnerError | SkillError | AgentError | GateError, RunnerDeps> =>
   Effect.gen(function* () {
     const skill = yield* loadSkill(skillPath)
@@ -90,7 +91,11 @@ export const runSkill = (
         | { ok: true; text: string; usage: { input_tokens: number; output_tokens: number } }
         | { ok: false; action: "retry" | "skip"; error: RunnerError }
 
-      const outcome = yield* runAgent(fullPrompt, systemContext, runId).pipe(
+      if (verbose) {
+        console.error(`[gates] state prompt: ${fullPrompt.slice(0, 200)}`)
+      }
+
+      const outcome = yield* runAgent(fullPrompt, systemContext, runId, verbose).pipe(
         Effect.mapError((e): RunnerError => e instanceof RunnerError ? e : new RunnerError(`Agent failed in state ${currentState}`, e)),
         Effect.map((r): AgentOutcome => ({ ok: true, text: r.text, usage: r.usage })),
         Effect.catchTag("RunnerError", (e): Effect.Effect<AgentOutcome, RunnerError, Persistence> => {
@@ -147,6 +152,9 @@ export const runSkill = (
       const nextLinear = stateNames[currentIdx + 1]
 
       const nextState = yield* resolveTransition(stateDef, output, nextLinear)
+      if (verbose) {
+        console.error(`[gates] transition: ${currentState} → ${nextState}`)
+      }
       currentState = nextState
     }
 

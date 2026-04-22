@@ -58,7 +58,8 @@ export interface RunResult {
 export const run = (
   prompt: string,
   systemPrompt?: string,
-  parentRunId?: string
+  parentRunId?: string,
+  verbose?: boolean
 ): Effect.Effect<RunResult, AgentError | GateError, RunDeps> =>
   Effect.gen(function* () {
     const llm = yield* LLMService
@@ -132,7 +133,19 @@ export const run = (
             return
           }
 
+          if (verbose) {
+            for (const call of response.tool_calls) {
+              console.error(`[gates] tool call: ${call.name} ${JSON.stringify(call.input)}`)
+            }
+          }
+
           const results = yield* executeToolCalls(runId, response.tool_calls)
+
+          if (verbose) {
+            for (const result of results) {
+              console.error(`[gates] tool result: ${result.id} ${result.content.slice(0, 200)}`)
+            }
+          }
 
           yield* persistence.record(runId, {
             type: "tool_result",

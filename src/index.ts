@@ -13,7 +13,10 @@ import { Auth, AuthLayer } from "./auth/Auth.js"
 import { run } from "./agent/Loop.js"
 import { runSkill } from "./machine/Runner.js"
 
-const [, , cmd, ...rest] = process.argv
+const rawArgs = process.argv.slice(2)
+const verbose = rawArgs.includes("--verbose")
+const filteredArgs = rawArgs.filter((a) => a !== "--verbose")
+const [cmd, ...rest] = filteredArgs
 
 const AppLayer = Layer.mergeAll(
   LLMLayer,
@@ -60,9 +63,9 @@ const runAuth = (args: string[]) =>
     console.log("Usage:\n  gates auth set <key>\n  gates auth show\n  gates auth remove")
   }).pipe(Effect.provide(AuthLayer))
 
-const runAgent = async (prompt: string) => {
+const runAgent = async (prompt: string, verbose?: boolean) => {
   const systemPrompt = await loadContext()
-  return run(prompt, systemPrompt).pipe(
+  return run(prompt, systemPrompt, undefined, verbose).pipe(
     Effect.tap(({ text }) => Effect.sync(() => console.log(text || "(task completed — agent returned no text)"))),
     Effect.provide(AppLayer)
   )
@@ -144,7 +147,7 @@ const main = async () => {
     const filteredKvArgs = kvArgs.filter(a => a !== "--json")
     const inputs = parseKvArgs(filteredKvArgs)
     const systemPrompt = await loadContext()
-    const effect = runSkill(resolve(skillShortcut), inputs, systemPrompt).pipe(
+    const effect = runSkill(resolve(skillShortcut), inputs, systemPrompt, verbose).pipe(
       Effect.tap((results) =>
         Effect.sync(() => {
           const states = Object.keys(results)
@@ -171,7 +174,7 @@ const main = async () => {
     const filteredKvArgs = kvArgs.filter(a => a !== '--json')
     const inputs = parseKvArgs(filteredKvArgs)
     const systemPrompt = await loadContext()
-    const effect = runSkill(resolve(skillPath), inputs, systemPrompt).pipe(
+    const effect = runSkill(resolve(skillPath), inputs, systemPrompt, verbose).pipe(
       Effect.tap((results) =>
         Effect.sync(() => {
           const states = Object.keys(results)
@@ -200,14 +203,17 @@ const main = async () => {
 gates — autonomous coding agent
 
 USAGE
-  gates <prompt>                        run the agent with a direct prompt
-  gates <skill> "<description>"         run a skill (shortcut)
-  gates run <skill.yaml> [key=value .]  run a skill by path
-  gates stats                           show token usage and cost per run
-  gates auth set <key>                  save Anthropic API key
-  gates auth show                       show stored key (masked)
-  gates auth remove                     delete stored key
-  gates help                            show this message
+  gates [--verbose] <prompt>                        run the agent with a direct prompt
+  gates [--verbose] <skill> "<description>"         run a skill (shortcut)
+  gates [--verbose] run <skill.yaml> [key=value .]  run a skill by path
+  gates stats                                       show token usage and cost per run
+  gates auth set <key>                              save Anthropic API key
+  gates auth show                                   show stored key (masked)
+  gates auth remove                                 delete stored key
+  gates help                                        show this message
+
+FLAGS
+  --verbose   log each tool call, tool result, and state transition to stderr
 
 SKILLS${skillList ? "\n" + skillList : "  (none installed)"}
 
@@ -220,7 +226,7 @@ EXAMPLES
     process.exit(prompt ? 0 : 1)
   }
 
-  await Effect.runPromise(await runAgent(prompt))
+  await Effect.runPromise(await runAgent(prompt, verbose))
 }
 
 main().catch((e) => {
