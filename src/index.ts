@@ -3,6 +3,7 @@ import { LLMLayer } from "./services/LLM.js"
 import { GateRegistryLayer } from "./services/GateRegistry.js"
 import { ToolRegistryLayer } from "./services/Tools.js"
 import { BuiltinGatesLayer } from "./gates/builtin.js"
+import { PersistenceLayer } from "./machine/Persistence.js"
 import { run } from "./agent/Loop.js"
 
 const prompt = process.argv.slice(2).join(" ")
@@ -16,6 +17,7 @@ const AppLayer = Layer.mergeAll(
   LLMLayer,
   GateRegistryLayer,
   ToolRegistryLayer,
+  PersistenceLayer,
   BuiltinGatesLayer.pipe(Layer.provide(GateRegistryLayer))
 )
 
