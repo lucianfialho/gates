@@ -1,0 +1,123 @@
+import { Effect, Context, Layer } from "effect"
+import { readFile } from "node:fs/promises"
+import { join, dirname } from "node:path"
+import { loadSkill, interpolate, resolveTransition, type Skill, SkillError } from "./Skill.js"
+import { Persistence } from "./Persistence.js"
+import { run as runAgent } from "../agent/Loop.js"
+import { LLMService } from "../services/LLM.js"
+import { GateRegistry } from "../services/GateRegistry.js"
+import { ToolRegistry } from "../services/Tools.js"
+import { AgentError } from "../agent/Loop.js"
+import { GateError } from "../gates/Gate.js"
+
+export class RunnerError {
+  readonly _tag = "RunnerError"
+  constructor(readonly reason: string, readonly cause?: unknown) {}
+}
+
+type RunnerDeps = LLMService | GateRegistry | ToolRegistry | Persistence
+
+interface StateResult {
+  state: string
+  output: unknown
+  agentText: string
+}
+
+const loadOutputSchema = async (
+  schemaPath: string,
+  skillDir: string
+): Promise<Record<string, unknown> | null> => {
+  try {
+    const raw = await readFile(join(skillDir, schemaPath), "utf-8")
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch { return null }
+}
+
+const extractJSON = (text: string): unknown | null => {
+  const match = /```json\s*([\s\S]+?)\s*```|(\{[\s\S]+\})/.exec(text)
+  if (!match) return null
+  try { return JSON.parse((match[1] ?? match[2])!) } catch { return null }
+}
+
+export const runSkill = (
+  skillPath: string,
+  inputs: Record<string, string> = {},
+  systemContext?: string
+): Effect.Effect<Record<string, StateResult>, RunnerError | SkillError | AgentError | GateError, RunnerDeps> =>
+  Effect.gen(function* () {
+    const skill = yield* loadSkill(skillPath)
+    const skillDir = dirname(skillPath)
+    const outputs: Record<string, StateResult> = {}
+    const persistence = yield* Persistence
+
+    const runId = yield* persistence.initRun(`skill:${skill.id} inputs:${JSON.stringify(inputs)}`)
+
+    let currentState = skill.initial_state
+    let steps = 0
+    const MAX_STEPS = 50
+
+    while (steps++ < MAX_STEPS) {
+      const stateDef = skill.states[currentState]
+      if (!stateDef) {
+        return yield* Effect.fail(new RunnerError(`Unknown state: ${currentState}`))
+      }
+
+      if (stateDef.terminal) break
+
+      // Build the prompt for this state
+      const statePrompt = interpolate(stateDef.agent_prompt, {
+        inputs,
+        outputs: Object.fromEntries(
+          Object.entries(outputs).map(([k, v]) => [k, v.output])
+        ),
+      })
+
+      const schemaInstructions = stateDef.output_schema
+        ? `\n\nRespond with a JSON code block (\`\`\`json\n...\n\`\`\`) matching the required output schema.`
+        : ""
+
+      const fullPrompt = statePrompt + schemaInstructions
+
+      yield* persistence.record(runId, {
+        type: "llm_request",
+        messages: [{ role: "user" as const, content: `[state: ${currentState}] ${fullPrompt}` }],
+        ts: new Date().toISOString(),
+      })
+
+      // Run the agent for this state
+      const agentText = yield* runAgent(fullPrompt, systemContext).pipe(
+        Effect.mapError((e) => e instanceof RunnerError ? e : new RunnerError(`Agent failed in state ${currentState}`, e))
+      )
+
+      // Parse output if schema defined
+      let output: unknown = { result: agentText }
+      if (stateDef.output_schema) {
+        const parsed = extractJSON(agentText)
+        if (parsed) output = parsed
+      }
+
+      outputs[currentState] = { state: currentState, output, agentText }
+
+      console.error(`[gates] state: ${currentState} → `, JSON.stringify(output).slice(0, 120))
+
+      // Determine next state
+      const stateNames = Object.keys(skill.states)
+      const currentIdx = stateNames.indexOf(currentState)
+      const nextLinear = stateNames[currentIdx + 1]
+
+      const nextState = yield* resolveTransition(stateDef, output, nextLinear)
+      currentState = nextState
+    }
+
+    if (steps >= MAX_STEPS) {
+      return yield* Effect.fail(new RunnerError(`Skill exceeded ${MAX_STEPS} state transitions`))
+    }
+
+    return outputs
+  })
+
+export class Runner extends Context.Service<Runner, {
+  run: typeof runSkill
+}>()("gates/Runner") {}
+
+export const RunnerLayer = Layer.succeed(Runner)({ run: runSkill })

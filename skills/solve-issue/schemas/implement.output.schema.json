@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "required": ["files_changed", "summary", "status"],
+  "properties": {
+    "files_changed": { "type": "array", "items": { "type": "string" } },
+    "summary": { "type": "string" },
+    "status": { "type": "string", "enum": ["done", "partial"] }
+  }
+}

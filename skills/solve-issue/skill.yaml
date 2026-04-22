@@ -1,0 +1,119 @@
+id: solve-issue
+version: 1
+description: Analyze a GitHub issue, plan a solution, and implement it step by step.
+
+initial_state: analyze
+
+inputs:
+  required:
+    - name: issue
+      type: string
+
+states:
+  analyze:
+    description: Understand the issue scope and identify affected files
+    agent_prompt: |
+      You are analyzing an issue to plan implementation.
+
+      Issue: {{inputs.issue}}
+
+      Your job:
+      1. Read relevant files using the read and glob tools
+      2. Identify exactly what needs to change and why
+      3. Produce a structured plan
+
+      Respond with a JSON code block:
+      ```json
+      {
+        "summary": "one-sentence description of the problem",
+        "files": ["list", "of", "files", "to", "change"],
+        "plan": ["step 1", "step 2", "step 3"],
+        "complexity": "low|medium|high"
+      }
+      ```
+    output_schema: schemas/analyze.output.schema.json
+    transitions:
+      - to: implement
+        when: complexity != high
+      - to: break_down
+        when: complexity == high
+
+  break_down:
+    description: High-complexity issue — split into sub-tasks first
+    agent_prompt: |
+      The issue is complex. Break it into smaller independent tasks.
+
+      Issue: {{inputs.issue}}
+      Analysis: {{outputs.analyze.summary}}
+      Plan: {{outputs.analyze.plan}}
+
+      Split this into 2-4 smaller tasks, each independently verifiable.
+
+      Respond with a JSON code block:
+      ```json
+      {
+        "tasks": [
+          { "title": "task title", "description": "what to do" }
+        ],
+        "first_task": "title of the task to tackle now"
+      }
+      ```
+    output_schema: schemas/break_down.output.schema.json
+    transitions:
+      - to: implement
+
+  implement:
+    description: Write the actual code changes
+    agent_prompt: |
+      Implement the solution. Use bash, read, write, edit, and glob tools as needed.
+
+      Issue: {{inputs.issue}}
+      Plan: {{outputs.analyze.plan}}
+      Files to change: {{outputs.analyze.files}}
+
+      Rules:
+      - Make only the changes required by the plan
+      - Do not add features, comments, or abstractions beyond what is needed
+      - After each file change, verify it looks correct
+
+      When done, respond with a JSON code block:
+      ```json
+      {
+        "files_changed": ["file1", "file2"],
+        "summary": "what was done in one sentence",
+        "status": "done|partial"
+      }
+      ```
+    output_schema: schemas/implement.output.schema.json
+    transitions:
+      - to: verify
+
+  verify:
+    description: Run tests or type checks to confirm nothing broke
+    agent_prompt: |
+      Verify the implementation is correct.
+
+      Changes made: {{outputs.implement.summary}}
+      Files changed: {{outputs.implement.files_changed}}
+
+      Steps:
+      1. Run the project's typecheck or test command if one exists
+      2. Check that the changed files have no obvious issues
+      3. Confirm the original issue is resolved
+
+      Respond with a JSON code block:
+      ```json
+      {
+        "passed": true,
+        "checks_run": ["typecheck", "etc"],
+        "issues": []
+      }
+      ```
+    output_schema: schemas/verify.output.schema.json
+    transitions:
+      - to: done
+
+  done:
+    terminal: true
+    description: Skill complete
+    agent_prompt: ""

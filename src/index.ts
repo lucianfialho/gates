@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect"
 import { readFile } from "node:fs/promises"
+import { resolve } from "node:path"
 import { LLMLayer } from "./services/LLM.js"
 import { GateRegistryLayer } from "./services/GateRegistry.js"
 import { ToolRegistryLayer } from "./services/Tools.js"
@@ -7,6 +8,7 @@ import { BuiltinGatesLayer } from "./gates/builtin.js"
 import { PersistenceLayer } from "./machine/Persistence.js"
 import { Auth, AuthLayer } from "./auth/Auth.js"
 import { run } from "./agent/Loop.js"
+import { runSkill } from "./machine/Runner.js"
 
 const [, , cmd, ...rest] = process.argv
 
@@ -63,15 +65,47 @@ const runAgent = async (prompt: string) => {
   )
 }
 
+const parseKvArgs = (args: string[]): Record<string, string> =>
+  Object.fromEntries(
+    args.flatMap((a) => {
+      const idx = a.indexOf("=")
+      return idx > 0 ? [[a.slice(0, idx), a.slice(idx + 1)]] : []
+    })
+  )
+
 const main = async () => {
   if (cmd === "auth") {
     await Effect.runPromise(runAuth(rest))
     return
   }
 
+  if (cmd === "run") {
+    const [skillPath, ...kvArgs] = rest
+    if (!skillPath) {
+      console.error("Usage: gates run <skill.yaml> [key=value ...]")
+      process.exit(1)
+    }
+    const inputs = parseKvArgs(kvArgs)
+    const systemPrompt = await loadContext()
+    const effect = runSkill(resolve(skillPath), inputs, systemPrompt).pipe(
+      Effect.tap((results) =>
+        Effect.sync(() => {
+          const states = Object.keys(results)
+          const last = states[states.length - 1]
+          if (last) console.log(JSON.stringify(results[last]?.output, null, 2))
+        })
+      ),
+      Effect.provide(AppLayer)
+    )
+    await Effect.runPromise(effect)
+    return
+  }
+
   const prompt = cmd ? [cmd, ...rest].join(" ") : ""
   if (!prompt) {
-    console.log("Usage:\n  gates <prompt>\n  gates auth set <key>\n  gates auth show\n  gates auth remove")
+    console.log(
+      "Usage:\n  gates <prompt>\n  gates run <skill.yaml> [key=value ...]\n  gates auth set <key>\n  gates auth show\n  gates auth remove"
+    )
     process.exit(1)
   }
 
