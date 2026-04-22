@@ -2,3 +2,4 @@ node_modules
 dist
 .env
 .gates/runs/
+.gates/context.json

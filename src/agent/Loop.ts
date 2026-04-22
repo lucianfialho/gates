@@ -14,6 +14,52 @@ type RunDeps = LLMService | GateRegistry | ToolRegistry | Persistence
 
 const now = () => new Date().toISOString()
 
+// Replace stale file-read results with a placeholder so they don't
+// accumulate in the message history across many tool-call rounds.
+const elideStaleReads = (messages: Message[], staleAfterTurns = 3): Message[] => {
+  // Map tool_use id → path for every "read" call
+  const readPaths = new Map<string, string>()
+  for (const msg of messages) {
+    if (msg.role === "assistant") {
+      for (const block of msg.content) {
+        if (block.type === "tool_use" && block.name === "read") {
+          const input = block.input as { path?: string }
+          readPaths.set(block.id, input.path ?? "unknown")
+        }
+      }
+    }
+  }
+
+  // Assign a turn index to each assistant message
+  let turn = 0
+  const assistantTurn = new Map<number, number>()
+  messages.forEach((msg, i) => {
+    if (msg.role === "assistant") assistantTurn.set(i, turn++)
+  })
+  const currentTurn = turn
+
+  return messages.map((msg, i) => {
+    if (msg.role !== "tool") return msg
+    // Find the assistant message immediately before this tool block
+    let prevTurn = -1
+    for (let j = i - 1; j >= 0; j--) {
+      const t = assistantTurn.get(j)
+      if (t !== undefined) { prevTurn = t; break }
+    }
+    const turnsAgo = currentTurn - prevTurn - 1
+    if (turnsAgo < staleAfterTurns) return msg
+    return {
+      ...msg,
+      results: msg.results.map((r) => {
+        const path = readPaths.get(r.id)
+        return path
+          ? { id: r.id, content: `[file cached: ${path} — re-read if needed]` }
+          : r
+      }),
+    }
+  })
+}
+
 const executeToolCalls = (
   runId: string,
   calls: ToolCall[]
@@ -80,7 +126,8 @@ export const run = (
       while: () => !done,
       body: () =>
         Effect.gen(function* () {
-          const messages = yield* Ref.get(messagesRef)
+          const rawMessages = yield* Ref.get(messagesRef)
+          const messages = elideStaleReads(rawMessages)
 
           yield* persistence.record(runId, {
             type: "llm_request",

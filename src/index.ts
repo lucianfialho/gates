@@ -12,6 +12,7 @@ import { PersistenceLayer } from "./machine/Persistence.js"
 import { Auth, AuthLayer } from "./auth/Auth.js"
 import { run } from "./agent/Loop.js"
 import { runSkill } from "./machine/Runner.js"
+import { updateContextFile } from "./context/ProjectContext.js"
 
 const rawArgs = process.argv.slice(2)
 const verbose = rawArgs.includes("--verbose")
@@ -67,6 +68,7 @@ const runAgent = async (prompt: string, verbose?: boolean) => {
   const systemPrompt = await loadContext()
   return run(prompt, systemPrompt, undefined, verbose).pipe(
     Effect.tap(({ text }) => Effect.sync(() => console.log(text || "(task completed — agent returned no text)"))),
+    Effect.tap(() => Effect.promise(() => updateContextFile())),
     Effect.provide(AppLayer)
   )
 }

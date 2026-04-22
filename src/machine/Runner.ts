@@ -9,6 +9,7 @@ import { GateRegistry } from "../services/GateRegistry.js"
 import { ToolRegistry } from "../services/Tools.js"
 import { AgentError } from "../agent/Loop.js"
 import { GateError } from "../gates/Gate.js"
+import { buildContextPrompt, updateContextFile } from "../context/ProjectContext.js"
 
 export class RunnerError {
   readonly _tag = "RunnerError"
@@ -91,11 +92,17 @@ export const runSkill = (
         | { ok: true; text: string; usage: { input_tokens: number; output_tokens: number } }
         | { ok: false; action: "retry" | "skip"; error: RunnerError }
 
+      // Inject project context snapshot into system prompt for this state
+      const contextSnippet = yield* Effect.promise(() => buildContextPrompt())
+      const stateSystem = contextSnippet
+        ? `${systemContext ?? ""}\n\n${contextSnippet}`.trim()
+        : systemContext
+
       if (verbose) {
         console.error(`[gates] state prompt: ${fullPrompt.slice(0, 200)}`)
       }
 
-      const outcome = yield* runAgent(fullPrompt, systemContext, runId, verbose).pipe(
+      const outcome = yield* runAgent(fullPrompt, stateSystem, runId, verbose).pipe(
         Effect.mapError((e): RunnerError => e instanceof RunnerError ? e : new RunnerError(`Agent failed in state ${currentState}`, e)),
         Effect.map((r): AgentOutcome => ({ ok: true, text: r.text, usage: r.usage })),
         Effect.catchTag("RunnerError", (e): Effect.Effect<AgentOutcome, RunnerError, Persistence> => {
@@ -171,6 +178,9 @@ export const runSkill = (
       ts: new Date().toISOString(),
     })
     console.error(`[gates] skill total: ${totalInput} in / ${totalOutput} out`)
+
+    // Update project context for future runs (best-effort)
+    yield* Effect.promise(() => updateContextFile())
 
     return outputs
   })
