@@ -1,0 +1,83 @@
+import { Context, Effect, Layer } from "effect"
+import Anthropic from "@anthropic-ai/sdk"
+import type { ToolCall } from "../gates/Gate.js"
+
+export class LLMError {
+  readonly _tag = "LLMError"
+  constructor(readonly cause: unknown) {}
+}
+
+export type Message =
+  | { role: "user"; content: string }
+  | { role: "assistant"; content: Anthropic.ContentBlock[] }
+  | { role: "tool"; results: Array<{ id: string; content: string }> }
+
+export interface ToolDef {
+  name: string
+  description: string
+  input_schema: Anthropic.Tool["input_schema"]
+}
+
+export interface LLMResponse {
+  stop_reason: Anthropic.Message["stop_reason"]
+  content: Anthropic.ContentBlock[]
+  tool_calls: ToolCall[]
+}
+
+export interface LLMShape {
+  readonly complete: (
+    messages: Message[],
+    tools: ToolDef[]
+  ) => Effect.Effect<LLMResponse, LLMError>
+}
+
+export class LLMService extends Context.Service<LLMService, LLMShape>()(
+  "gates/LLMService"
+) {}
+
+const makeImpl: Effect.Effect<LLMShape> = Effect.sync(() => {
+  const client = new Anthropic()
+
+  const complete = (
+    messages: Message[],
+    tools: ToolDef[]
+  ): Effect.Effect<LLMResponse, LLMError> =>
+    Effect.tryPromise({
+      try: () =>
+        client.messages.create({
+          model: "claude-opus-4-7",
+          max_tokens: 8096,
+          tools: tools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            input_schema: t.input_schema,
+          })),
+          messages: messages.map((m) => {
+            if (m.role === "tool") {
+              return {
+                role: "user" as const,
+                content: m.results.map((r) => ({
+                  type: "tool_result" as const,
+                  tool_use_id: r.id,
+                  content: r.content,
+                })),
+              }
+            }
+            return m
+          }),
+        }),
+      catch: (e) => new LLMError(e),
+    }).pipe(
+      Effect.map((res) => ({
+        stop_reason: res.stop_reason,
+        content: res.content,
+        tool_calls: res.content
+          .filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use")
+          .map((b) => ({ id: b.id, name: b.name, input: b.input })),
+      }))
+    )
+
+  return { complete }
+})
+
+export const LLMLayer = Layer.effect(LLMService)(makeImpl)
