@@ -48,10 +48,15 @@ const executeToolCalls = (
     )
   })
 
+export interface RunResult {
+  text: string
+  usage: { input_tokens: number; output_tokens: number }
+}
+
 export const run = (
   prompt: string,
   systemPrompt?: string
-): Effect.Effect<string, AgentError | GateError, RunDeps> =>
+): Effect.Effect<RunResult, AgentError | GateError, RunDeps> =>
   Effect.gen(function* () {
     const llm = yield* LLMService
     const tools = yield* ToolRegistry
@@ -141,5 +146,6 @@ export const run = (
       step: () => {},
     })
 
-    return (yield* Ref.get(resultRef)) ?? ""
+    const totalUsage = yield* Ref.get(usageRef)
+    return { text: (yield* Ref.get(resultRef)) ?? "", usage: totalUsage }
   })

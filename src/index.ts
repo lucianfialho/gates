@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect"
-import { readFile } from "node:fs/promises"
-import { resolve } from "node:path"
+import { readFile, readdir } from "node:fs/promises"
+import { resolve, join } from "node:path"
 import { LLMLayer } from "./services/LLM.js"
 import { GateRegistryLayer } from "./services/GateRegistry.js"
 import { ToolRegistryLayer } from "./services/Tools.js"
@@ -60,7 +60,7 @@ const runAuth = (args: string[]) =>
 const runAgent = async (prompt: string) => {
   const systemPrompt = await loadContext()
   return run(prompt, systemPrompt).pipe(
-    Effect.tap((result) => Effect.sync(() => console.log(result || "(task completed — agent returned no text)"))),
+    Effect.tap(({ text }) => Effect.sync(() => console.log(text || "(task completed — agent returned no text)"))),
     Effect.provide(AppLayer)
   )
 }
@@ -73,7 +73,56 @@ const parseKvArgs = (args: string[]): Record<string, string> =>
     })
   )
 
+const runStats = async () => {
+  const runsDir = join(process.cwd(), ".gates", "runs")
+  let files: string[]
+  try {
+    files = (await readdir(runsDir)).filter((f) => f.endsWith(".jsonl"))
+  } catch {
+    console.log("No runs yet. Run: gates <prompt>")
+    return
+  }
+
+  type Row = { ts: string; prompt: string; tin: number; tout: number; cost: number }
+  const rows: Row[] = []
+
+  for (const file of files) {
+    const lines = (await readFile(join(runsDir, file), "utf-8")).split("\n").filter(Boolean)
+    const parsed = lines.map((l) => { try { return JSON.parse(l) as Record<string, unknown> } catch { return null } }).filter(Boolean)
+    const start = parsed.find((e) => e!.type === "run_start") as { prompt: string; ts: string } | undefined
+    const complete = parsed.find((e) => e!.type === "run_complete") as { total_input_tokens: number; total_output_tokens: number } | undefined
+    if (!start || !complete) continue
+    const tin = Number(complete.total_input_tokens) || 0
+    const tout = Number(complete.total_output_tokens) || 0
+    if (tin === 0 && tout === 0) continue
+    // Sonnet 4.6: $3/MTok in, $15/MTok out
+    const cost = (tin / 1_000_000) * 3 + (tout / 1_000_000) * 15
+    rows.push({ ts: start.ts, prompt: start.prompt.slice(0, 55).replace(/\n/g, " "), tin, tout, cost })
+  }
+
+  rows.sort((a, b) => a.ts.localeCompare(b.ts))
+
+  const totalIn = rows.reduce((s, r) => s + r.tin, 0)
+  const totalOut = rows.reduce((s, r) => s + r.tout, 0)
+  const totalCost = rows.reduce((s, r) => s + r.cost, 0)
+
+  console.log(`\n${"date".padEnd(12)} ${"in tok".padStart(8)} ${"out tok".padStart(8)} ${"cost $".padStart(8)}  prompt`)
+  console.log("─".repeat(90))
+  for (const r of rows) {
+    const date = r.ts.slice(0, 10)
+    console.log(`${date.padEnd(12)} ${String(r.tin).padStart(8)} ${String(r.tout).padStart(8)} ${r.cost.toFixed(4).padStart(8)}  ${r.prompt}`)
+  }
+  console.log("─".repeat(90))
+  console.log(`${"TOTAL".padEnd(12)} ${String(totalIn).padStart(8)} ${String(totalOut).padStart(8)} ${totalCost.toFixed(4).padStart(8)}`)
+  console.log()
+}
+
 const main = async () => {
+  if (cmd === "stats") {
+    await runStats()
+    return
+  }
+
   if (cmd === "auth") {
     await Effect.runPromise(runAuth(rest))
     return
@@ -112,7 +161,7 @@ const main = async () => {
   const prompt = cmd ? [cmd, ...rest].join(" ") : ""
   if (!prompt) {
     console.log(
-      "Usage:\n  gates <prompt>\n  gates run <skill.yaml> [key=value ...]\n  gates auth set <key>\n  gates auth show\n  gates auth remove"
+      "Usage:\n  gates <prompt>\n  gates run <skill.yaml> [key=value ...]\n  gates stats\n  gates auth set <key>\n  gates auth show\n  gates auth remove"
     )
     process.exit(1)
   }

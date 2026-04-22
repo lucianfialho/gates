@@ -55,6 +55,8 @@ export const runSkill = (
     let currentState = skill.initial_state
     let steps = 0
     const MAX_STEPS = 50
+    let totalInput = 0
+    let totalOutput = 0
 
     while (steps++ < MAX_STEPS) {
       const stateDef = skill.states[currentState]
@@ -85,9 +87,11 @@ export const runSkill = (
       })
 
       // Run the agent for this state
-      const agentText = yield* runAgent(fullPrompt, systemContext).pipe(
+      const { text: agentText, usage } = yield* runAgent(fullPrompt, systemContext).pipe(
         Effect.mapError((e) => e instanceof RunnerError ? e : new RunnerError(`Agent failed in state ${currentState}`, e))
       )
+      totalInput += usage.input_tokens
+      totalOutput += usage.output_tokens
 
       // Parse output if schema defined
       let output: unknown = { result: agentText }
@@ -112,6 +116,16 @@ export const runSkill = (
     if (steps >= MAX_STEPS) {
       return yield* Effect.fail(new RunnerError(`Skill exceeded ${MAX_STEPS} state transitions`))
     }
+
+    const lastState = Object.keys(outputs).at(-1) ?? ""
+    yield* persistence.record(runId, {
+      type: "run_complete",
+      result: lastState,
+      total_input_tokens: totalInput,
+      total_output_tokens: totalOutput,
+      ts: new Date().toISOString(),
+    })
+    console.error(`[gates] skill total: ${totalInput} in / ${totalOutput} out`)
 
     return outputs
   })
