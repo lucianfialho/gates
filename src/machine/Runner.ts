@@ -57,6 +57,7 @@ export const runSkill = (
     const MAX_STEPS = 50
     let totalInput = 0
     let totalOutput = 0
+    let retryCount = 0
 
     while (steps++ < MAX_STEPS) {
       const stateDef = skill.states[currentState]
@@ -85,9 +86,49 @@ export const runSkill = (
         ts: new Date().toISOString(),
       })
 
-      const { text: agentText, usage } = yield* runAgent(fullPrompt, systemContext, runId).pipe(
-        Effect.mapError((e) => e instanceof RunnerError ? e : new RunnerError(`Agent failed in state ${currentState}`, e))
+      type AgentOutcome =
+        | { ok: true; text: string; usage: { input_tokens: number; output_tokens: number } }
+        | { ok: false; action: "retry" | "skip"; error: RunnerError }
+
+      const outcome = yield* runAgent(fullPrompt, systemContext, runId).pipe(
+        Effect.mapError((e): RunnerError => e instanceof RunnerError ? e : new RunnerError(`Agent failed in state ${currentState}`, e)),
+        Effect.map((r): AgentOutcome => ({ ok: true, text: r.text, usage: r.usage })),
+        Effect.catchTag("RunnerError", (e): Effect.Effect<AgentOutcome, RunnerError, Persistence> => {
+          const policy = stateDef.on_error ?? "abort"
+          const maxRetries = stateDef.max_retries ?? 2
+          if (policy === "retry" && retryCount < maxRetries) {
+            retryCount++
+            return persistence.record(runId, { type: "state_error", state: currentState, policy, retryCount, error: e.reason, ts: new Date().toISOString() }).pipe(
+              Effect.map((): AgentOutcome => ({ ok: false, action: "retry", error: e }))
+            )
+          }
+          if (policy === "skip") {
+            return persistence.record(runId, { type: "state_error", state: currentState, policy, retryCount, error: e.reason, ts: new Date().toISOString() }).pipe(
+              Effect.map((): AgentOutcome => ({ ok: false, action: "skip", error: e }))
+            )
+          }
+          return Effect.fail(e)
+        })
       )
+
+      if (!outcome.ok) {
+        if (outcome.action === "retry") {
+          console.error(`[gates] state ${currentState} failed, retrying (${retryCount})`)
+          steps--
+          continue
+        }
+        // skip
+        retryCount = 0
+        const stateNames = Object.keys(skill.states)
+        const currentIdx = stateNames.indexOf(currentState)
+        const nextLinear = stateNames[currentIdx + 1]
+        const nextState = yield* resolveTransition(stateDef, {}, nextLinear)
+        currentState = nextState
+        continue
+      }
+
+      const { text: agentText, usage } = outcome
+      retryCount = 0
       totalInput += usage.input_tokens
       totalOutput += usage.output_tokens
 

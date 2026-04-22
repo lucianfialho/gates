@@ -15,6 +15,7 @@ export type RunEvent =
   | { type: "tool_result"; results: ToolResult[]; ts: string }
   | { type: "run_complete"; result: string; total_input_tokens: number; total_output_tokens: number; ts: string }
   | { type: "run_failed"; error: string; ts: string }
+  | { type: "state_error"; state: string; policy: string; retryCount: number; error: string; ts: string }
 
 export interface PersistenceShape {
   readonly initRun: (prompt: string, parentRunId?: string) => Effect.Effect<string>
