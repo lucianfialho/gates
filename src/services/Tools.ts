@@ -120,6 +120,21 @@ const grep: ToolHandler = (id, input) =>
     catch: (e) => new ToolError("grep", e),
   })
 
+const read_lines: ToolHandler = (id, input) =>
+  Effect.tryPromise({
+    try: async () => {
+      const { path, start, end } = input as { path: string; start: number; end: number }
+      const content = await readFile(path, "utf-8")
+      const lines = content.split("\n")
+      const total = lines.length
+      if (start < 1 || start > total) throw new Error(`start=${start} is out of range (file has ${total} lines)`)
+      if (end < start || end > total) throw new Error(`end=${end} is out of range (start=${start}, file has ${total} lines)`)
+      const selected = lines.slice(start - 1, end).map((line, i) => `${start + i}: ${line}`).join("\n")
+      return { id, content: selected }
+    },
+    catch: (e) => new ToolError("read_lines", e),
+  })
+
 const fetch_url: ToolHandler = (id, input) =>
   Effect.tryPromise({
     try: async () => {
@@ -153,6 +168,7 @@ const handlers = new Map<string, ToolHandler>([
   ["glob", glob],
   ["grep", grep],
   ["fetch", fetch_url],
+  ["read_lines", read_lines],
 ])
 
 const definitions: ToolDef[] = [
@@ -249,6 +265,19 @@ const definitions: ToolDef[] = [
         },
       },
       required: ["url"],
+    },
+  },
+  {
+    name: "read_lines",
+    description: "Read a specific line range from a file. Cheaper than reading the whole file.",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        start: { type: "number", description: "1-based inclusive start line" },
+        end: { type: "number", description: "1-based inclusive end line" },
+      },
+      required: ["path", "start", "end"],
     },
   },
 ]
