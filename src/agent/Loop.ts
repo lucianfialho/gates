@@ -49,7 +49,8 @@ const executeToolCalls = (
   })
 
 export const run = (
-  prompt: string
+  prompt: string,
+  systemPrompt?: string
 ): Effect.Effect<string, AgentError | GateError, RunDeps> =>
   Effect.gen(function* () {
     const llm = yield* LLMService
@@ -78,7 +79,7 @@ export const run = (
           })
 
           const response = yield* llm
-            .complete(messages, tools.definitions)
+            .complete(messages, tools.definitions, systemPrompt)
             .pipe(Effect.mapError((e) => new AgentError(e.cause)))
 
           yield* persistence.record(runId, {

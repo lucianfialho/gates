@@ -62,10 +62,29 @@ const write: ToolHandler = (id, input) =>
     catch: (e) => new ToolError("write", e),
   })
 
+const edit: ToolHandler = (id, input) =>
+  Effect.tryPromise({
+    try: async () => {
+      const { path, old_string, new_string } = input as {
+        path: string
+        old_string: string
+        new_string: string
+      }
+      const original = await readFile(path, "utf-8")
+      const count = original.split(old_string).length - 1
+      if (count === 0) throw new Error(`old_string not found in ${path}`)
+      if (count > 1) throw new Error(`old_string matches ${count} times in ${path} — be more specific`)
+      await writeFile(path, original.replace(old_string, new_string), "utf-8")
+      return { id, content: `Edited: ${path}` }
+    },
+    catch: (e) => new ToolError("edit", e),
+  })
+
 const handlers = new Map<string, ToolHandler>([
   ["bash", bash],
   ["read", read],
   ["write", write],
+  ["edit", edit],
 ])
 
 const definitions: ToolDef[] = [
@@ -89,7 +108,7 @@ const definitions: ToolDef[] = [
   },
   {
     name: "write",
-    description: "Write a file",
+    description: "Write a new file (or fully overwrite). Prefer edit for existing files.",
     input_schema: {
       type: "object",
       properties: {
@@ -97,6 +116,19 @@ const definitions: ToolDef[] = [
         content: { type: "string" },
       },
       required: ["path", "content"],
+    },
+  },
+  {
+    name: "edit",
+    description: "Replace the first (and only) occurrence of old_string with new_string in a file. Fails if old_string is not found or appears more than once.",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        old_string: { type: "string" },
+        new_string: { type: "string" },
+      },
+      required: ["path", "old_string", "new_string"],
     },
   },
 ]

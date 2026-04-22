@@ -27,7 +27,8 @@ export interface LLMResponse {
 export interface LLMShape {
   readonly complete: (
     messages: Message[],
-    tools: ToolDef[]
+    tools: ToolDef[],
+    system?: string
   ) => Effect.Effect<LLMResponse, LLMError>
 }
 
@@ -40,13 +41,15 @@ const makeImpl: Effect.Effect<LLMShape> = Effect.sync(() => {
 
   const complete = (
     messages: Message[],
-    tools: ToolDef[]
+    tools: ToolDef[],
+    system?: string
   ): Effect.Effect<LLMResponse, LLMError> =>
     Effect.tryPromise({
       try: () =>
         client.messages.create({
           model: "claude-opus-4-7",
           max_tokens: 8096,
+          ...(system ? { system } : {}),
           tools: tools.map((t) => ({
             name: t.name,
             description: t.description,
