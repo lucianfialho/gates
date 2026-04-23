@@ -8,13 +8,27 @@ import { getProviderConfig } from "../config/GatesConfig.js"
 
 // ── intent routing ────────────────────────────────────────────────────────────
 
+export type Mode = "read" | "patch" | "standard"
+
 type Intent =
   | { type: "skill"; skillName: "solve-issue" | "write-tests"; arg: string }
   | { type: "freeform"; arg: string }
+  | { type: "mode-switch"; mode: Mode }
+
+// Mode system prompts — injected based on active mode
+const MODE_SYSTEM: Record<Mode, string> = {
+  read:     "You are in READ-ONLY mode. You may read files and answer questions but MUST NOT edit, write, or commit any files. If asked to change something, explain what would need to change without doing it.",
+  patch:    "You are in PATCH mode. Make minimal, targeted changes only. Prefer editing existing code over rewriting. No new files unless strictly necessary.",
+  standard: "",
+}
 
 // Option 3 — explicit commands (zero cost, highest priority)
 const classifyExplicit = (text: string): Intent | null => {
   const t = text.trim()
+  // Mode switches — configure the whole system
+  if (t === "@read"     || t.startsWith("@read "))     return { type: "mode-switch", mode: "read" }
+  if (t === "@patch"    || t.startsWith("@patch "))    return { type: "mode-switch", mode: "patch" }
+  if (t === "@standard" || t.startsWith("@standard ")) return { type: "mode-switch", mode: "standard" }
   // /s <text> or /solve <text> — explicit skill trigger (any language)
   if (/^\/s\s+/i.test(t))           return { type: "skill", skillName: "solve-issue", arg: t.replace(/^\/s\s+/i, "") }
   if (/^\/solve\s+/i.test(t))       return { type: "skill", skillName: "solve-issue", arg: t.replace(/^\/solve\s+/i, "") }
@@ -24,7 +38,7 @@ const classifyExplicit = (text: string): Intent | null => {
   // English explicit prefixes
   if (/^solve(-issue)?\s+/i.test(t)) return { type: "skill", skillName: "solve-issue", arg: t.replace(/^solve(-issue)?\s+/i, "") }
   if (/^(write-tests?|test)\s+/i.test(t)) return { type: "skill", skillName: "write-tests", arg: t.replace(/^(write-tests?|test)\s+/i, "") }
-  return null  // ambiguous → needs LLM classification
+  return null  // ambiguous → freeform
 }
 
 // Option 2 — LLM classifies ambiguous messages (any language, ~200 tokens)
@@ -121,6 +135,7 @@ export const App = ({ runEffect, systemPrompt }: {
   const [hitl, setHitl]     = useState<{ state: string; output: unknown; isError: boolean; resolve: (v: boolean) => void } | null>(null)
   const [runStats, setRunStats] = useState<{ totalIn: number; totalOut: number; startMs: number } | null>(null)
   const [modelInfo, setModelInfo] = useState<string>("")
+  const [mode, setMode] = useState<Mode>("standard")
   const idRef               = useRef(0)
 
   // Load provider:model from config on mount
@@ -154,9 +169,20 @@ export const App = ({ runEffect, systemPrompt }: {
   const handleSubmit = useCallback(async (value: string) => {
     if (!value.trim() || status !== "idle") return
 
-    // Explicit commands only — ambiguous text is always freeform
-    // Use /s, /solve, issue number, or "solve-issue ..." to trigger skill
     const intent = classifyExplicit(value.trim()) ?? { type: "freeform" as const, arg: value.trim() }
+
+    // Mode switch — no LLM call needed
+    if (intent.type === "mode-switch") {
+      setMode(intent.mode)
+      setMsgs(prev => [...prev, {
+        id: String(++idRef.current), role: "assistant",
+        text: `Mode: ${intent.mode.toUpperCase()}${intent.mode === "read" ? " — read-only, no edits" : intent.mode === "patch" ? " — minimal targeted changes" : " — full lifecycle"}`,
+        tools: [],
+      }])
+      setInput("")
+      return
+    }
+
     setMsgs(prev => [...prev, { id: String(++idRef.current), role: "user", text: value.trim(), tools: [] }])
     setStatus("thinking")
     setLiveLines([{ icon: "⟳", text: "thinking…", dim: true }])
@@ -235,8 +261,10 @@ export const App = ({ runEffect, systemPrompt }: {
           issue: intent.arg,
           ...(chatContext ? { chat_context: chatContext } : {}),
         }
+        const modePrompt = MODE_SYSTEM[mode]
+        const effectiveSystem = [systemPrompt, modePrompt].filter(Boolean).join("\n\n") || undefined
         const skillResult = await runEffect(
-          runSkill(skillPath, inputs, systemPrompt, false, chatHITL, onEvent) as unknown as Effect.Effect<Record<string, { output: unknown }>, never, never>
+          runSkill(skillPath, inputs, effectiveSystem, false, chatHITL, onEvent) as unknown as Effect.Effect<Record<string, { output: unknown }>, never, never>
         ) as Record<string, { output: unknown }>
         // Extract the last state's output as text
         const states = Object.keys(skillResult)
@@ -247,9 +275,11 @@ export const App = ({ runEffect, systemPrompt }: {
           usage: { input_tokens: 0, output_tokens: 0 },
         }
       } else {
-        // Route to run — direct agent execution (no state machine)
+        // Route to run — direct agent execution with mode system prompt
+        const modePrompt = MODE_SYSTEM[mode]
+        const effectiveSystem = [systemPrompt, modePrompt].filter(Boolean).join("\n\n") || undefined
         result = await runEffect(
-          run(intent.arg, systemPrompt, undefined, false, onEvent) as unknown as Effect.Effect<{ text: string; usage: { input_tokens: number; output_tokens: number } }, never, never>
+          run(intent.arg, effectiveSystem, undefined, false, onEvent) as unknown as Effect.Effect<{ text: string; usage: { input_tokens: number; output_tokens: number } }, never, never>
         )
       }
 
@@ -325,7 +355,11 @@ export const App = ({ runEffect, systemPrompt }: {
       {/* header — fixed 3 rows */}
       <box flexDirection="row" height={HEADER_H} paddingX={1} paddingY={1} gap={2} border={["bottom"]} borderStyle="single">
         <text><b fg="#00CFCF">gates</b></text>
-        <text fg="#555555">{statusText}</text>
+        <text fg={mode === "read" ? "#FF8844" : mode === "patch" ? "#AAAA00" : "#555555"}>
+          {mode !== "standard" ? `@${mode}  ` : ""}{statusText}
+        </text>
+        <box flexGrow={1} />
+        <text fg="#333333">@read · @patch · @standard</text>
       </box>
 
       {/* messages */}
