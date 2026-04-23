@@ -55,6 +55,7 @@ export const App = ({ runEffect, systemPrompt }: {
   const [status, setStatus] = useState<"idle" | "thinking" | "hitl">("idle")
   const [currentState, setCurrentState] = useState<{ name: string; step: number; total: number } | null>(null)
   const [hitl, setHitl]     = useState<{ state: string; output: unknown; isError: boolean; resolve: (v: boolean) => void } | null>(null)
+  const [runStats, setRunStats] = useState<{ totalIn: number; totalOut: number; startMs: number } | null>(null)
   const idRef               = useRef(0)
 
   useKeyboard((key) => {
@@ -80,6 +81,7 @@ export const App = ({ runEffect, systemPrompt }: {
     setMsgs(prev => [...prev, { id: String(++idRef.current), role: "user", text: value.trim(), tools: [] }])
     setStatus("thinking")
     setLiveLines([{ icon: "⟳", text: "thinking…", dim: true }])
+    setRunStats({ totalIn: 0, totalOut: 0, startMs: Date.now() })
     setInput("")
 
     const tools: Array<{ text: string; isGate: boolean }> = []
@@ -109,6 +111,13 @@ export const App = ({ runEffect, systemPrompt }: {
       setLiveLines(prev => [...prev.slice(-(MAX_LIVE - 1)), { icon, text, dim }])
 
     const onEvent = (ev: ChatEvent) => {
+      if (ev.type === "done") {
+        setRunStats(prev => prev ? {
+          ...prev,
+          totalIn: prev.totalIn + ev.usage.input_tokens,
+          totalOut: prev.totalOut + ev.usage.output_tokens,
+        } : null)
+      }
       if (ev.type === "state_change") {
         setCurrentState({ name: ev.state, step: ev.step, total: ev.total })
         addLive("◎", `[${ev.state}]  ${ev.step}/${ev.total}`, false)
@@ -173,11 +182,26 @@ export const App = ({ runEffect, systemPrompt }: {
     status === "thinking" ? "thinking…" :
     "ready  ·  ESC to quit"
 
+  // Compute elapsed and stats for the status bar
+  const statsBar = (() => {
+    if (!runStats) return null
+    const elapsed = Math.floor((Date.now() - runStats.startMs) / 1000)
+    const mins = Math.floor(elapsed / 60)
+    const secs = elapsed % 60
+    const elapsedStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
+    const { totalIn, totalOut } = runStats
+    if (totalIn === 0 && totalOut === 0) return `  ⏱ ${elapsedStr}`
+    // MiniMax pricing: $0.30/MTok in, $1.20/MTok out
+    const cost = (totalIn / 1_000_000) * 0.30 + (totalOut / 1_000_000) * 1.20
+    return `${(totalIn / 1000).toFixed(0)}k in · ${(totalOut / 1000).toFixed(0)}k out · $${cost.toFixed(4)} · ${elapsedStr}`
+  })()
+
   const rows = process.stdout.rows ?? 24
   const cols = process.stdout.columns ?? 80
   const HEADER_H = 3   // 1 padding + 1 text + 1 border
   const INPUT_H = 3    // 1 border top + 1 text + 1 border bottom
-  const scrollH = rows - HEADER_H - INPUT_H
+  const STATS_H = statsBar ? 1 : 0
+  const scrollH = rows - HEADER_H - INPUT_H - STATS_H
 
   return (
     <box flexDirection="column" height={rows} width={cols}>
@@ -256,6 +280,14 @@ export const App = ({ runEffect, systemPrompt }: {
             <text><b fg="#44AA44">[Y] {hitl.isError ? "Retry" : "Proceed"}</b></text>
             <text><b fg="#FF4444">[N] {hitl.isError ? "Skip state" : "Abort"}</b></text>
           </box>
+        </box>
+      )}
+
+      {/* status bar — token usage + elapsed time */}
+      {statsBar && (
+        <box flexDirection="row" paddingX={2} height={1}>
+          <box flexGrow={1} />
+          <text fg="#444444">{statsBar}</text>
         </box>
       )}
 
