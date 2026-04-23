@@ -127,6 +127,8 @@ const executeToolCalls = (
           Effect.catchTag("GateError", (e) => {
             const blockStart = performance.now()
             onEvent?.({ type: "gate_block", gate: e.gate, reason: e.reason })
+            // Return block message as tool result so agent can recover
+            // (use grep, use read_lines, etc.) rather than crashing the state
             return persistence
               .record(runId, {
                 type: "gate_block",
@@ -136,7 +138,7 @@ const executeToolCalls = (
                 ts: now(),
                 duration: Math.round(performance.now() - blockStart),
               })
-              .pipe(Effect.andThen(Effect.fail(e)))
+              .pipe(Effect.map(() => ({ id: call.id, content: `[BLOCKED by ${e.gate}]: ${e.reason}` })))
           }),
         ),
       { concurrency: 1 }
