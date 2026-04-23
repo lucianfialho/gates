@@ -13,6 +13,7 @@ import { PersistenceLayer } from "./machine/Persistence.js"
 import { Auth, AuthLayer } from "./auth/Auth.js"
 import { run } from "./agent/Loop.js"
 import { runSkill } from "./machine/Runner.js"
+import { simulate } from "./machine/Simulate.js"
 import { updateContextFile } from "./context/ProjectContext.js"
 import { startChat } from "./chat/index.js"
 
@@ -230,6 +231,13 @@ const runLogs = async (runId?: string) => {
 const main = async () => {
   if (cmd === "stats") {
     await runStats()
+    return
+  }
+
+  if (cmd === "simulate") {
+    const [skillPath, ...kvArgs] = rest
+    if (!skillPath) { console.error("Usage: gates simulate <skill.yaml> [key=value ...]"); process.exit(1) }
+    await simulate(resolve(skillPath), parseKvArgs(kvArgs))
     return
   }
 

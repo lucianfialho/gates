@@ -114,12 +114,34 @@ export const runSkill = (
         console.error(`[gates] state prompt: ${fullPrompt.slice(0, 200)}`)
       }
 
-      const outcome = yield* runAgent(fullPrompt, stateSystem, runId, verbose).pipe(
-        Effect.mapError((e): RunnerError => e instanceof RunnerError ? e : new RunnerError(`Agent failed in state ${currentState}`, e)),
+      // Apply per-state timeout if configured
+      const agentEffect = stateDef.timeout_ms
+        ? Effect.promise(() =>
+            Promise.race([
+              Effect.runPromise(runAgent(fullPrompt, stateSystem, runId, verbose) as Effect.Effect<{ text: string; usage: { input_tokens: number; output_tokens: number } }, never, never>),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(`State "${currentState}" timed out after ${stateDef.timeout_ms}ms`)), stateDef.timeout_ms!)
+              ),
+            ])
+          ).pipe(Effect.mapError((e) => new RunnerError(`Timeout in state ${currentState}`, e)))
+        : runAgent(fullPrompt, stateSystem, runId, verbose).pipe(
+            Effect.mapError((e): RunnerError => e instanceof RunnerError ? e : new RunnerError(`Agent failed in state ${currentState}`, e))
+          )
+
+      const outcome = yield* agentEffect.pipe(
         Effect.map((r): AgentOutcome => ({ ok: true, text: r.text, usage: r.usage })),
         Effect.catchTag("RunnerError", (e): Effect.Effect<AgentOutcome, RunnerError, Persistence> => {
           const policy = stateDef.on_error ?? "abort"
           const maxRetries = stateDef.max_retries ?? 2
+
+          // on_error_state: transition to a named state instead of crashing
+          if (stateDef.on_error_state) {
+            console.error(`[gates] ✗ ${e.reason} — transitioning to error state: ${stateDef.on_error_state}`)
+            return persistence.record(runId, { type: "state_error", state: currentState, policy: "error_state", retryCount, error: e.reason, ts: new Date().toISOString() }).pipe(
+              Effect.map((): AgentOutcome => ({ ok: false, action: "skip", error: e }))
+            )
+          }
+
           if (policy === "retry" && retryCount < maxRetries) {
             retryCount++
             return persistence.record(runId, { type: "state_error", state: currentState, policy, retryCount, error: e.reason, ts: new Date().toISOString() }).pipe(
@@ -141,8 +163,13 @@ export const runSkill = (
           steps--
           continue
         }
-        // skip
         retryCount = 0
+        // on_error_state: jump to named state instead of linear next
+        if (stateDef.on_error_state) {
+          currentState = stateDef.on_error_state
+          continue
+        }
+        // skip: advance linearly
         const stateNames = Object.keys(skill.states)
         const currentIdx = stateNames.indexOf(currentState)
         const nextLinear = stateNames[currentIdx + 1]
