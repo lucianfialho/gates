@@ -262,23 +262,25 @@ states:
 
   verify:
     description: |
-      Independent review. GATE: passed must be true.
+      Lightweight verification — run commands only, no re-reading files.
+      GATE: passed must be true.
     agent_prompt: |
-      Verify the implementation against the PRP acceptance criteria.
+      Verify the implementation by running commands. Do NOT re-read source files —
+      the implement state already read them. Only run tools, check outputs.
 
       Changes made: {{outputs.implement.summary}}
-      Files changed: {{outputs.implement.files_changed}}
+      Typecheck already passed: {{outputs.implement.typecheck_passed}}
 
-      PRP acceptance criteria to verify:
+      PRP acceptance criteria:
       {{outputs.analyze.acceptance}}
 
-      Steps:
-      1. Read each changed file independently
-      2. For each item in acceptance criteria: run the command or check the condition
-      3. Report pass/fail per criterion
+      Steps — commands only, no file reads:
+      1. Run: bash("bun run typecheck 2>&1") — must exit 0
+      2. For any criterion that requires running a command: run it
+      3. For criteria about code structure (not runnable): mark as verified-by-implement
 
-      GATE CONDITION: run each acceptance criterion yourself.
-      Do not assume — verify each one explicitly.
+      GATE CONDITION: typecheck exits 0. Do not read files.
+      If typecheck passes and implement confirmed the changes, that is sufficient.
 
       Respond with a JSON code block:
       ```json

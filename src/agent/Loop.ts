@@ -16,7 +16,7 @@ const now = () => new Date().toISOString()
 
 // Replace stale file-read results with a placeholder so they don't
 // accumulate in the message history across many tool-call rounds.
-const elideStaleReads = (messages: Message[], staleAfterTurns = 3): Message[] => {
+const elideStaleReads = (messages: Message[], staleAfterTurns = 2): Message[] => {
   // Map tool_use id → path for every "read" call
   const readPaths = new Map<string, string>()
   for (const msg of messages) {
