@@ -1,4 +1,4 @@
 [
   "src/index.ts",
-  "package.json"
+  "src/config/GatesConfig.ts"
 ]

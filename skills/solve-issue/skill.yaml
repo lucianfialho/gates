@@ -270,6 +270,8 @@ states:
     output_schema: schemas/verify.output.schema.json
     on_error: retry
     max_retries: 1
+    budget_tokens: 30000
+    timeout_ms: 60000
     transitions:
       - to: done
         when: passed == true

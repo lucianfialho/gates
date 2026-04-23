@@ -17,6 +17,7 @@ import { simulate } from "./machine/Simulate.js"
 import { updateContextFile } from "./context/ProjectContext.js"
 import { startChat } from "./chat/index.js"
 import { GatewayService, GatewayServiceLive } from "./machine/Gateway.js"
+import { getBudget } from "./config/GatesConfig.js"
 
 const rawArgs = process.argv.slice(2)
 const verbose = rawArgs.includes("--verbose")
@@ -178,6 +179,16 @@ const runStats = async () => {
   const totalOut = rows.reduce((s, r) => s + r.tout, 0)
   const totalCost = rows.reduce((s, r) => s + r.cost, 0)
 
+  // Filter to current calendar month for budget bar
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const currentMonth = now.getMonth()
+  const monthlyRows = rows.filter(r => {
+    const d = new Date(r.ts)
+    return d.getFullYear() === currentYear && d.getMonth() === currentMonth
+  })
+  const monthlyCost = monthlyRows.reduce((s, r) => s + r.cost, 0)
+
   if (outputJson) {
     const output = {
       rows: rows.map(r => ({ ts: r.ts, prompt: r.prompt, tin: r.tin, tout: r.tout, cost: r.cost })),
@@ -186,6 +197,14 @@ const runStats = async () => {
     }
     console.log(JSON.stringify(output))
     return
+  }
+
+  // Budget bar (hidden when budget is 0 or in --json mode)
+  const budget = await getBudget()
+  if (budget > 0) {
+    const filled = Math.floor((monthlyCost / budget) * 20)
+    const bar = "=".repeat(filled) + ".".repeat(Math.max(0, 20 - filled))
+    console.log(` [${monthlyCost.toFixed(2)} / ${budget.toFixed(2)} ] [${bar}]`)
   }
 
   console.log(`\n${"date".padEnd(12)} ${"in tok".padStart(8)} ${"out tok".padStart(8)} ${"cost $".padStart(8)}  prompt`)
