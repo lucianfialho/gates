@@ -3,8 +3,8 @@
 modified: 2026-04-23
 files:
   - src/chat/App.tsx
-summary: Show modelInfo in status bar immediately on mount, not only after a run completes
+summary: Consolidate modelInfo into statsBar, displaying provider:model suffix alongside token counts in single status bar line
 acceptance_criteria_verified:
   - bun run typecheck exits 0
   - modelInfo displayed in status bar immediately on app mount
-  - statsBar renders alongside modelInfo after run completes
+  - statsBar renders provider:model suffix alongside token counts after run completes

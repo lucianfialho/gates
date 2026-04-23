@@ -306,10 +306,10 @@ export const App = ({ runEffect, systemPrompt }: {
     const secs = elapsed % 60
     const elapsedStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
     const { totalIn, totalOut } = runStats
-    if (totalIn === 0 && totalOut === 0) return `  ⏱ ${elapsedStr}`
+    if (totalIn === 0 && totalOut === 0) return `  ⏱ ${elapsedStr}  · ${modelInfo}`
     // MiniMax pricing: $0.30/MTok in, $1.20/MTok out
     const cost = (totalIn / 1_000_000) * 0.30 + (totalOut / 1_000_000) * 1.20
-    return `${(totalIn / 1000).toFixed(0)}k in · ${(totalOut / 1000).toFixed(0)}k out · ${cost.toFixed(2)} · ${elapsedStr}`
+    return `${(totalIn / 1000).toFixed(0)}k in · ${(totalOut / 1000).toFixed(0)}k out · ${cost.toFixed(2)} · ${elapsedStr}  · ${modelInfo}`
   })()
 
   const rows = termSize.rows
@@ -403,11 +403,9 @@ export const App = ({ runEffect, systemPrompt }: {
       )}
 
       {/* status bar — token usage + elapsed time + provider:model */}
-      {(statsBar || modelInfo) && (
+      {statsBar && (
         <box flexDirection="row" paddingX={2} height={1}>
-          <box flexGrow={1} />
-          {statsBar && <text fg="#444444">{statsBar}</text>}
-          {modelInfo && <><text fg="#444444"> · </text><text fg="#555555">{modelInfo}</text></>}
+          <text fg="#444444">{statsBar}</text>
         </box>
       )}
 
