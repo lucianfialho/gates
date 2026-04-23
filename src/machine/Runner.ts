@@ -13,6 +13,67 @@ import { buildContextPrompt, updateContextFile } from "../context/ProjectContext
 import { writeRelevantPaths } from "../context/RelevantPaths.js"
 import { buildResearchContext, formatResearchContext } from "../context/ResearchContext.js"
 import { validate } from "./schema_validate.js"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
+
+const execFileAsync = promisify(execFile)
+
+// Deterministic branch creation — no LLM needed
+const runBranch = async (prp: Record<string, unknown>): Promise<string> => {
+  const issueNum = prp["issue_number"]
+  const prpId = prp["id"] as string | undefined
+  const branch = issueNum ? `issue-${issueNum}` : (prpId ?? "feature").slice(0, 40)
+  try {
+    await execFileAsync("git", ["checkout", "-b", branch], { cwd: process.cwd() })
+  } catch {
+    // branch may already exist — checkout and continue
+    await execFileAsync("git", ["checkout", branch], { cwd: process.cwd() })
+  }
+  console.error(`[gates] ✓ branch: ${branch}`)
+  return branch
+}
+
+// Deterministic commit + push + PR — no LLM needed
+const runOpenPR = async (
+  prp: Record<string, unknown>,
+  branch: string,
+  implementSummary: string
+): Promise<string> => {
+  const issueNum = prp["issue_number"]
+  const title = (prp["issue_title"] as string | undefined) ?? implementSummary
+  const id = prp["id"] as string | undefined ?? "fix"
+
+  // Detect conventional commit type from PRP id or title
+  const type = id.startsWith("fix") || title.toLowerCase().startsWith("fix") ? "fix" :
+               id.startsWith("feat") || id.startsWith("add") ? "feat" :
+               id.startsWith("doc") ? "docs" :
+               id.startsWith("refactor") ? "refactor" : "feat"
+
+  const footer = [
+    `Co-Authored-By: Gates <noreply@gates.dev>`,
+    issueNum ? `Closes #${issueNum}` : "",
+  ].filter(Boolean).join("\n")
+
+  const commitMsg = `${type}: ${title}\n\n${footer}`
+
+  await execFileAsync("git", ["add", "-A"], { cwd: process.cwd() })
+  await execFileAsync("git", ["commit", "-m", commitMsg], { cwd: process.cwd() })
+  await execFileAsync("git", ["push", "--set-upstream", "origin", branch], { cwd: process.cwd() })
+
+  const body = [
+    `## Summary\n${implementSummary}`,
+    issueNum ? `Closes #${issueNum}` : "",
+    `\n🤖 Generated with [gates](https://github.com/lucianfialho/gates)`,
+  ].filter(Boolean).join("\n\n")
+
+  const { stdout } = await execFileAsync(
+    "gh", ["pr", "create", "--title", title, "--body", body, "--base", "main"],
+    { cwd: process.cwd() }
+  )
+  const prUrl = stdout.trim()
+  console.error(`[gates] ✓ PR: ${prUrl}`)
+  return prUrl
+}
 
 export class RunnerError {
   readonly _tag = "RunnerError"
@@ -274,36 +335,29 @@ export const runSkill = (
         yield* Effect.promise(() => writeRelevantPaths({ files: researchOut["likely_files"] }))
       }
 
-      // After analyze (PRP): overwrite relevant paths with confirmed contract files
+      // After analyze (PRP): overwrite relevant paths + create branch deterministically
       if (currentState === "analyze") {
         const prp = output as Record<string, unknown>
         const ctx = prp["context"] as Record<string, unknown> | undefined
         yield* Effect.promise(() => writeRelevantPaths({ files: ctx?.["files"] ?? [] }))
       }
 
-      // Branch state: verify branch was actually created by checking git branch --show-current
-      if (currentState === "branch") {
-        const branchOut = output as Record<string, unknown>
-        const expectedBranch = branchOut["branch"] as string | undefined
-        const verified = branchOut["verified"] as string | undefined
-
-        if (!expectedBranch) {
-          return yield* Effect.fail(new RunnerError("Branch state: missing 'branch' field in output"))
+      // After verify: create branch + commit + push + PR deterministically (no LLM)
+      if (currentState === "verify") {
+        const verifyOut = output as Record<string, unknown>
+        const passed = verifyOut["passed"]
+        if (passed) {
+          const prp = (outputs["analyze"]?.output ?? {}) as Record<string, unknown>
+          const implOut = (outputs["implement"]?.output ?? {}) as Record<string, unknown>
+          const summary = String(implOut["summary"] ?? "implement changes")
+          // Create branch from PRP data
+          const branch = yield* Effect.promise(() => runBranch(prp))
+          // Commit + push + create PR
+          const prUrl = yield* Effect.promise(() => runOpenPR(prp, branch, summary))
+          // Inject PR URL into outputs so the skill can show it
+          outputs["_pr"] = { state: "_pr", output: { pr_url: prUrl, branch }, agentText: "" }
+          console.error(`[gates] ✓ open_pr: ${prUrl}`)
         }
-
-        if (!verified) {
-          return yield* Effect.fail(new RunnerError("Branch state: missing 'verified' field — agent must run 'git branch --show-current' and include output"))
-        }
-
-        // Normalize: trim and compare (git branch --show-current may have trailing newline)
-        const normalizedVerified = verified.trim()
-        if (normalizedVerified !== expectedBranch) {
-          const msg = `Branch verification failed: expected '${expectedBranch}', got '${normalizedVerified}' from git branch --show-current`
-          console.error(`[gates] ✗ ${msg}`)
-          yield* persistence.record(runId, { type: "state_error", state: currentState, policy: "abort", retryCount, error: msg, ts: new Date().toISOString() })
-          return yield* Effect.fail(new RunnerError(msg))
-        }
-        console.error(`[gates] ✓ branch verified: ${normalizedVerified}`)
       }
 
       // HITL Gate — pause and require human approval before advancing
