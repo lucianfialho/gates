@@ -108,7 +108,7 @@ states:
     output_schema: schemas/research.output.schema.json
     on_error: retry
     max_retries: 2
-    budget_tokens: 15000
+    budget_tokens: 80000
     transitions:
       - to: analyze
 
