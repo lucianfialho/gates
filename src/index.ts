@@ -131,6 +131,8 @@ const parseKvArgs = (args: string[]): Record<string, string> =>
 const runStats = async () => {
   const runsDir = join(process.cwd(), ".gates", "runs")
   let files: string[]
+  const outputJson = rawArgs.includes("--json") || rest.includes("--json")
+
   try {
     files = (await readdir(runsDir)).filter((f) => f.endsWith(".jsonl"))
   } catch {
@@ -175,6 +177,16 @@ const runStats = async () => {
   const totalIn = rows.reduce((s, r) => s + r.tin, 0)
   const totalOut = rows.reduce((s, r) => s + r.tout, 0)
   const totalCost = rows.reduce((s, r) => s + r.cost, 0)
+
+  if (outputJson) {
+    const output = {
+      rows: rows.map(r => ({ ts: r.ts, prompt: r.prompt, tin: r.tin, tout: r.tout, cost: r.cost })),
+      totals: { tin: totalIn, tout: totalOut, cost: totalCost },
+      cache_metrics: { cache_hits: totalCacheHits, cache_invalidations: totalCacheInvalidations, tokens_cached: totalTokensCached }
+    }
+    console.log(JSON.stringify(output))
+    return
+  }
 
   console.log(`\n${"date".padEnd(12)} ${"in tok".padStart(8)} ${"out tok".padStart(8)} ${"cost $".padStart(8)}  prompt`)
   console.log("─".repeat(90))
