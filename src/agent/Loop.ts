@@ -16,45 +16,54 @@ const now = () => new Date().toISOString()
 
 // Replace stale file-read results with a placeholder so they don't
 // accumulate in the message history across many tool-call rounds.
-const elideStaleReads = (messages: Message[], staleAfterTurns = 2): Message[] => {
-  // Map tool_use id → path for every "read" call
-  const readPaths = new Map<string, string>()
+// Elide older duplicate reads — keeps only the LATEST read of each path+range.
+// Agent only sees [cached] when it already re-read that range later, so it
+// has no reason to re-read again.
+const elideStaleReads = (messages: Message[]): Message[] => {
+  // Build label map: tool_id → human-readable label
+  const toolLabels = new Map<string, string>()
+  // Track which turn each tool_id was called in
+  const idToTurn = new Map<string, number>()
+  // Track the latest turn each label appears in
+  const latestTurnForLabel = new Map<string, number>()
+
+  let turn = 0
   for (const msg of messages) {
-    if (msg.role === "assistant") {
-      for (const block of msg.content) {
-        if (block.type === "tool_use" && block.name === "read") {
-          const input = block.input as { path?: string }
-          readPaths.set(block.id, input.path ?? "unknown")
-        }
+    if (msg.role !== "assistant") continue
+    for (const block of msg.content) {
+      if (block.type !== "tool_use") continue
+      const input = block.input as Record<string, unknown>
+      let label: string | null = null
+      if (block.name === "read" || block.name === "read_lines") {
+        const range = input["start"] != null ? `:${input["start"]}-${input["end"]}` : ""
+        label = `${block.name}(${input["path"] ?? "?"}${range})`
+      } else if (block.name === "grep") {
+        label = `grep("${input["pattern"]}", ${input["path"]})`
+      }
+      if (label) {
+        toolLabels.set(block.id, label)
+        idToTurn.set(block.id, turn)
+        const prev = latestTurnForLabel.get(label) ?? -1
+        if (turn > prev) latestTurnForLabel.set(label, turn)
       }
     }
+    turn++
   }
 
-  // Assign a turn index to each assistant message
-  let turn = 0
-  const assistantTurn = new Map<number, number>()
-  messages.forEach((msg, i) => {
-    if (msg.role === "assistant") assistantTurn.set(i, turn++)
-  })
-  const currentTurn = turn
-
-  return messages.map((msg, i) => {
+  return messages.map((msg) => {
     if (msg.role !== "tool") return msg
-    // Find the assistant message immediately before this tool block
-    let prevTurn = -1
-    for (let j = i - 1; j >= 0; j--) {
-      const t = assistantTurn.get(j)
-      if (t !== undefined) { prevTurn = t; break }
-    }
-    const turnsAgo = currentTurn - prevTurn - 1
-    if (turnsAgo < staleAfterTurns) return msg
     return {
       ...msg,
       results: msg.results.map((r) => {
-        const path = readPaths.get(r.id)
-        return path
-          ? { id: r.id, content: `[file cached: ${path} — re-read if needed]` }
-          : r
+        const label = toolLabels.get(r.id)
+        if (!label) return r
+        const myTurn = idToTurn.get(r.id) ?? -1
+        const latestTurn = latestTurnForLabel.get(label) ?? -1
+        // Only elide if this same label was read again in a LATER turn
+        if (myTurn < latestTurn) {
+          return { id: r.id, content: `[duplicate: ${label} — use the later result]` }
+        }
+        return r
       }),
     }
   })
@@ -118,6 +127,8 @@ const executeToolCalls = (
           Effect.catchTag("GateError", (e) => {
             const blockStart = performance.now()
             onEvent?.({ type: "gate_block", gate: e.gate, reason: e.reason })
+            // Return block message as tool result so agent can recover
+            // (use grep, use read_lines, etc.) rather than crashing the state
             return persistence
               .record(runId, {
                 type: "gate_block",
@@ -127,7 +138,7 @@ const executeToolCalls = (
                 ts: now(),
                 duration: Math.round(performance.now() - blockStart),
               })
-              .pipe(Effect.andThen(Effect.fail(e)))
+              .pipe(Effect.map(() => ({ id: call.id, content: `[BLOCKED by ${e.gate}]: ${e.reason}` })))
           }),
         ),
       { concurrency: 1 }

@@ -19,6 +19,22 @@ export interface GatesConfig {
   providers?: Record<string, ProviderConfig>
   context_scope?: "full" | "analyze_only"
   indexed_directories?: IndexedDirectory[]
+  budget?: number
+}
+
+export const getBudget = async (): Promise<number> => {
+  // GATES_BUDGET env var takes precedence if set and > 0
+  const envBudget = parseInt(process.env["GATES_BUDGET"] ?? "", 10)
+  if (!isNaN(envBudget) && envBudget > 0) {
+    return envBudget
+  }
+  // Fall back to config.budget if set and > 0
+  const cfg = await loadGatesConfig()
+  if (cfg.budget != null && cfg.budget > 0) {
+    return cfg.budget
+  }
+  // Default to 10
+  return 10
 }
 
 let _cache: GatesConfig | null = null

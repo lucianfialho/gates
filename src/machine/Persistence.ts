@@ -25,6 +25,7 @@ export type RunEvent =
   | { type: "run_complete"; result: string; total_input_tokens: number; total_output_tokens: number; ts: string; duration?: number }
   | { type: "run_failed"; error: string; ts: string }
   | { type: "state_error"; state: string; policy: string; retryCount: number; error: string; ts: string }
+  | { type: "state_complete"; state: string; output: unknown; agentText: string; ts: string }
   | { type: "cache_metrics"; metrics: CacheMetrics; ts: string }
 
 export interface PersistenceShape {

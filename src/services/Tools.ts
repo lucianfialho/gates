@@ -95,6 +95,9 @@ const glob: ToolHandler = (id, input) =>
     catch: (e) => new ToolError("glob", e),
   })
 
+const MAX_GREP_LINES = 150
+const MAX_GREP_CHARS = 8_000
+
 const grep: ToolHandler = (id, input) =>
   Effect.tryPromise({
     try: async () => {
@@ -112,9 +115,14 @@ const grep: ToolHandler = (id, input) =>
         if (e.code === 1) return { stdout: "" }  // no matches — not an error
         throw e
       })
+      const lines = stdout.trim().split("\n")
+      const limited = lines.slice(0, MAX_GREP_LINES).join("\n").slice(0, MAX_GREP_CHARS)
+      const suffix = lines.length > MAX_GREP_LINES
+        ? `\n… (${lines.length - MAX_GREP_LINES} more lines — use read_lines for specific sections)`
+        : ""
       return {
         id,
-        content: stdout.trim() || "(no matches)",
+        content: limited ? limited + suffix : "(no matches)",
       }
     },
     catch: (e) => new ToolError("grep", e),

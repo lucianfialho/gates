@@ -16,6 +16,8 @@ import { runSkill } from "./machine/Runner.js"
 import { simulate } from "./machine/Simulate.js"
 import { updateContextFile } from "./context/ProjectContext.js"
 import { startChat } from "./chat/index.js"
+import { GatewayService, GatewayServiceLive } from "./machine/Gateway.js"
+import { getBudget } from "./config/GatesConfig.js"
 
 const rawArgs = process.argv.slice(2)
 const verbose = rawArgs.includes("--verbose")
@@ -27,7 +29,8 @@ const AppLayer = Layer.mergeAll(
   GateRegistryLayer,
   ToolRegistryLayer,
   PersistenceLayer,
-  BuiltinGatesLayer.pipe(Layer.provide(GateRegistryLayer))
+  BuiltinGatesLayer.pipe(Layer.provide(GateRegistryLayer)),
+  GatewayServiceLive.pipe(Layer.provide(LLMLayer))
 )
 
 const loadContext = async (): Promise<string | undefined> => {
@@ -129,6 +132,8 @@ const parseKvArgs = (args: string[]): Record<string, string> =>
 const runStats = async () => {
   const runsDir = join(process.cwd(), ".gates", "runs")
   let files: string[]
+  const outputJson = rawArgs.includes("--json") || rest.includes("--json")
+
   try {
     files = (await readdir(runsDir)).filter((f) => f.endsWith(".jsonl"))
   } catch {
@@ -173,6 +178,34 @@ const runStats = async () => {
   const totalIn = rows.reduce((s, r) => s + r.tin, 0)
   const totalOut = rows.reduce((s, r) => s + r.tout, 0)
   const totalCost = rows.reduce((s, r) => s + r.cost, 0)
+
+  // Filter to current calendar month for budget bar
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const currentMonth = now.getMonth()
+  const monthlyRows = rows.filter(r => {
+    const d = new Date(r.ts)
+    return d.getFullYear() === currentYear && d.getMonth() === currentMonth
+  })
+  const monthlyCost = monthlyRows.reduce((s, r) => s + r.cost, 0)
+
+  if (outputJson) {
+    const output = {
+      rows: rows.map(r => ({ ts: r.ts, prompt: r.prompt, tin: r.tin, tout: r.tout, cost: r.cost })),
+      totals: { tin: totalIn, tout: totalOut, cost: totalCost },
+      cache_metrics: { cache_hits: totalCacheHits, cache_invalidations: totalCacheInvalidations, tokens_cached: totalTokensCached }
+    }
+    console.log(JSON.stringify(output))
+    return
+  }
+
+  // Budget bar (hidden when budget is 0 or in --json mode)
+  const budget = await getBudget()
+  if (budget > 0) {
+    const filled = Math.floor((monthlyCost / budget) * 20)
+    const bar = "=".repeat(filled) + ".".repeat(Math.max(0, 20 - filled))
+    console.log(` [${monthlyCost.toFixed(2)} / ${budget.toFixed(2)} ] [${bar}]`)
+  }
 
   console.log(`\n${"date".padEnd(12)} ${"in tok".padStart(8)} ${"out tok".padStart(8)} ${"cost $".padStart(8)}  prompt`)
   console.log("─".repeat(90))
@@ -316,6 +349,67 @@ const main = async () => {
     return
   }
 
+  if (cmd === "resume") {
+    const runIdPrefix = rest[0]
+    if (!runIdPrefix) { console.error("Usage: gates resume <run-id>"); process.exit(1) }
+
+    const runsDir = join(process.cwd(), ".gates", "runs")
+    const files = (await readdir(runsDir).catch(() => [])).filter(f => f.endsWith(".jsonl"))
+    const match = files.find(f => f === `${runIdPrefix}.jsonl` || f.startsWith(runIdPrefix))
+    if (!match) { console.error(`No run found matching: ${runIdPrefix}`); process.exit(1) }
+
+    const lines = (await readFile(join(runsDir, match), "utf-8")).split("\n").filter(Boolean)
+    const events = lines.map(l => { try { return JSON.parse(l) as Record<string, unknown> } catch { return null } }).filter(Boolean)
+
+    // Recover original inputs and skill path from run_start
+    const start = events.find(e => e!.type === "run_start") as { prompt: string } | undefined
+    const promptStr = start?.prompt ?? ""
+    const skillMatch = /skill:([\w/-]+)/.exec(promptStr)
+    const inputsMatch = /inputs:(\{.+\})$/.exec(promptStr)
+    const recoveredInputs = inputsMatch?.[1] ? JSON.parse(inputsMatch[1]) as Record<string, string> : {}
+    const skillName = skillMatch?.[1] ?? "solve-issue"
+    const skillPath = join(__dirname, "..", "skills", skillName.replace(/^skill:/, ""), "skill.yaml")
+
+    // Reconstruct outputs from completed states
+    const resumeOutputs: Record<string, { state: string; output: unknown; agentText: string }> = {}
+    let failedState = ""
+    for (const ev of events) {
+      if (ev!.type === "state_complete") {
+        const e = ev as { state: string; output: unknown; agentText: string }
+        resumeOutputs[e.state] = { state: e.state, output: e.output, agentText: e.agentText ?? "" }
+      }
+      if (ev!.type === "state_error") {
+        failedState = (ev as { state: string }).state
+      }
+    }
+
+    if (!failedState) { console.error("Run completed successfully — nothing to resume."); process.exit(0) }
+
+    const completedStates = Object.keys(resumeOutputs)
+    console.error(`[resume] run=${match.slice(0, 8)} skill=${skillName}`)
+    console.error(`[resume] completed: ${completedStates.join(" → ")}`)
+    console.error(`[resume] resuming at: ${failedState}`)
+
+    const systemPrompt = await loadContext()
+    const effect = runSkill(
+      resolve(skillPath),
+      { ...recoveredInputs, initial_state_override: failedState },
+      systemPrompt,
+      verbose,
+      cliHITL,
+      undefined,
+      resumeOutputs
+    ).pipe(
+      Effect.tap((results) => Effect.sync(() => {
+        const last = Object.values(results).at(-1)
+        if (last) console.log(JSON.stringify(last.output, null, 2))
+      })),
+      Effect.provide(AppLayer)
+    )
+    await Effect.runPromise(effect as any)
+    return
+  }
+
   if (cmd === "auth") {
     await Effect.runPromise(runAuth(rest))
     return
@@ -433,7 +527,81 @@ EXAMPLES
     process.exit(prompt ? 0 : 1)
   }
 
-  await Effect.runPromise(await (runAgent(prompt, verbose) as any))
+  // Gateway: classify intent → route to the right execution mode
+  const systemPrompt = await loadContext()
+  const skillsDir = join(__dirname, "..", "skills")
+  const defaultSkill = join(skillsDir, "solve-issue", "skill.yaml")
+  const hasDefaultSkill = await access(defaultSkill).then(() => true).catch(() => false)
+
+  const gatewayEffect = Effect.gen(function* () {
+    const gateway = yield* GatewayService
+    const decision = yield* gateway.classify(prompt)
+
+    console.error(`[gateway] mode=${decision.mode} intent="${decision.intent.slice(0, 60)}"`)
+
+    switch (decision.mode) {
+      case "ProRN":
+      case "LEARN": {
+        // Read-only Q&A or docs — direct agent, no PR, no skill overhead
+        const learnSystem = decision.mode === "LEARN"
+          ? `${systemPrompt ?? ""}\n\nMode: LEARN. You are generating documentation or explanations only. Do not modify implementation files.`
+          : systemPrompt
+        const result = yield* run(decision.intent, learnSystem, undefined, verbose)
+        console.log(result.text || "(no output)")
+        yield* Effect.promise(() => updateContextFile())
+        break
+      }
+
+      case "PATCH": {
+        // Minor change — skip clarify+research, enter skill at analyze directly
+        if (hasDefaultSkill) {
+          yield* runSkill(
+            resolve(defaultSkill),
+            { issue: decision.intent, initial_state_override: "analyze" },
+            systemPrompt,
+            verbose,
+            cliHITL
+          ).pipe(
+            Effect.tap((results) => Effect.sync(() => {
+              const last = Object.values(results).at(-1)
+              if (last) console.log(JSON.stringify(last.output, null, 2))
+            }))
+          )
+        } else {
+          const result = yield* run(decision.intent, systemPrompt, undefined, verbose)
+          console.log(result.text || "(no output)")
+          yield* Effect.promise(() => updateContextFile())
+        }
+        break
+      }
+
+      case "STANDARD":
+      default: {
+        // Full lifecycle — skill if available, raw agent otherwise
+        if (hasDefaultSkill) {
+          yield* runSkill(
+            resolve(defaultSkill),
+            { issue: decision.intent },
+            systemPrompt,
+            verbose,
+            cliHITL
+          ).pipe(
+            Effect.tap((results) => Effect.sync(() => {
+              const last = Object.values(results).at(-1)
+              if (last) console.log(JSON.stringify(last.output, null, 2))
+            }))
+          )
+        } else {
+          const result = yield* run(decision.intent, systemPrompt, undefined, verbose)
+          console.log(result.text || "(no output)")
+          yield* Effect.promise(() => updateContextFile())
+        }
+        break
+      }
+    }
+  }).pipe(Effect.provide(AppLayer))
+
+  await Effect.runPromise(gatewayEffect as any)
 }
 
 main().catch((e) => {
