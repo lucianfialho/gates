@@ -1,0 +1,7 @@
+id: gates-context
+title: Project context snapshot for agent injection
+covers:
+  - src/context/ProjectContext.ts
+specialist: context
+last_updated: 2026-04-23
+status: filled

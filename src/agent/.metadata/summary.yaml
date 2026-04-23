@@ -1,0 +1,7 @@
+id: gates-agent
+title: Agent loop — LLM conversation with tool execution
+covers:
+  - src/agent/Loop.ts
+specialist: agent-loop
+last_updated: 2026-04-23
+status: filled

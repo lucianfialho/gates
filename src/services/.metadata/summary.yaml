@@ -1,0 +1,9 @@
+id: gates-services
+title: LLM service, tool registry, gate registry
+covers:
+  - src/services/LLM.ts
+  - src/services/Tools.ts
+  - src/services/GateRegistry.ts
+specialist: services
+last_updated: 2026-04-23
+status: filled

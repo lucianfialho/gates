@@ -1,0 +1,10 @@
+id: gates-gates
+title: Gate implementations — BashSafety and Metadata commit gate
+covers:
+  - src/gates/Gate.ts
+  - src/gates/BashSafety.ts
+  - src/gates/Metadata.ts
+  - src/gates/builtin.ts
+specialist: gates
+last_updated: 2026-04-23
+status: filled

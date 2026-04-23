@@ -1,0 +1,7 @@
+id: gates-auth
+title: BYOK auth — env var or ~/.local/share/gates/auth.json
+covers:
+  - src/auth/Auth.ts
+specialist: auth
+last_updated: 2026-04-23
+status: filled

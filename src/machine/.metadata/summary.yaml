@@ -1,0 +1,10 @@
+id: gates-machine
+title: State machine runner, skill loader, persistence, schema validation
+covers:
+  - src/machine/Runner.ts
+  - src/machine/Skill.ts
+  - src/machine/Persistence.ts
+  - src/machine/schema_validate.ts
+specialist: state-machine
+last_updated: 2026-04-23
+status: filled

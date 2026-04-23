@@ -1,0 +1,21 @@
+version: 1
+
+project:
+  name: gates
+  stack: [typescript, bun, effect-v4, anthropic-sdk]
+
+indexed_directories:
+  - path: src/agent
+    specialist: agent-loop
+  - path: src/machine
+    specialist: state-machine
+  - path: src/services
+    specialist: services
+  - path: src/gates
+    specialist: gates
+  - path: src/context
+    specialist: context
+  - path: src/auth
+    specialist: auth
+  - path: skills
+    specialist: skills

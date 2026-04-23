@@ -1,0 +1,8 @@
+id: gates-skills
+title: YAML state machine skills — solve-issue and write-tests
+covers:
+  - skills/solve-issue/skill.yaml
+  - skills/write-tests/skill.yaml
+specialist: skills
+last_updated: 2026-04-23
+status: filled
