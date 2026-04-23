@@ -13,7 +13,7 @@ providers:
   anthropic: {}
   openai: {}
   minimax:
-    base_url: https://api.minimax.io/anthropic/v1
+    base_url: https://api.minimax.io/v1
   ollama:
     base_url: http://localhost:11434/v1
 
