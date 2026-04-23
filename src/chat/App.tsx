@@ -1,19 +1,28 @@
 import React, { useState, useCallback, useRef } from "react"
 import { useKeyboard, useRenderer } from "@opentui/react"
 import { Effect } from "effect"
+import { join } from "node:path"
 import { run, type ChatEvent } from "../agent/Loop.js"
+import { runSkill, type HITLCallback } from "../machine/Runner.js"
 
 // ── intent routing ────────────────────────────────────────────────────────────
 
-const classifyIntent = (text: string): { skill?: "solve-issue" | "write-tests"; arg: string } => {
+type Intent =
+  | { type: "skill"; skillName: "solve-issue" | "write-tests"; arg: string }
+  | { type: "freeform"; arg: string }
+
+const classifyIntent = (text: string): Intent => {
   const t = text.trim()
-  if (/^\d+$/.test(t))                                                  return { skill: "solve-issue", arg: t }
-  if (/^solve(-issue)?\s+/i.test(t))                                    return { skill: "solve-issue", arg: t.replace(/^solve(-issue)?\s+/i, "") }
-  if (/^(write-tests?|test)\s+/i.test(t))                               return { skill: "write-tests", arg: t.replace(/^(write-tests?|test)\s+/i, "") }
+  if (/^\d+$/.test(t))                                                  return { type: "skill", skillName: "solve-issue", arg: t }
+  if (/^solve(-issue)?\s+/i.test(t))                                    return { type: "skill", skillName: "solve-issue", arg: t.replace(/^solve(-issue)?\s+/i, "") }
+  if (/^(write-tests?|test)\s+/i.test(t))                               return { type: "skill", skillName: "write-tests", arg: t.replace(/^(write-tests?|test)\s+/i, "") }
   if (/\b(fix|add|implement|create|refactor|build|migrate)\b/i.test(t) && t.length > 20)
-                                                                          return { skill: "solve-issue", arg: t }
-  return { arg: t }
+                                                                          return { type: "skill", skillName: "solve-issue", arg: t }
+  return { type: "freeform", arg: t }
 }
+
+const resolveSkillPath = (skillName: string): string =>
+  join(__dirname, "..", "..", "skills", skillName, "skill.yaml")
 
 const toolSummary = (name: string, input: unknown): string => {
   const inp = input as Record<string, unknown>
@@ -138,14 +147,37 @@ export const App = ({ runEffect, systemPrompt }: {
       }
     }
 
+    // Resolve skill path if this is a skill intent
+    const skillPath = intent.type === "skill" ? resolveSkillPath(intent.skillName) : null
+
     try {
-      const result = await runEffect(
-        run(intent.arg, systemPrompt, undefined, false, onEvent) as unknown as Effect.Effect<{ text: string; usage: { input_tokens: number; output_tokens: number } }, never, never>
-      )
+      let result: { text?: string; usage: { input_tokens: number; output_tokens: number } }
+
+      if (skillPath && intent.type === "skill") {
+        // Route to runSkill — full state machine with HITL and onEvent
+        const inputs: Record<string, string> = { issue: intent.arg }
+        const skillResult = await runEffect(
+          runSkill(skillPath, inputs, systemPrompt, false, chatHITL, onEvent) as unknown as Effect.Effect<Record<string, { output: unknown }>, never, never>
+        ) as Record<string, { output: unknown }>
+        // Extract the last state's output as text
+        const states = Object.keys(skillResult)
+        const lastKey = states[states.length - 1]
+        const last = lastKey ? skillResult[lastKey] : undefined
+        result = {
+          text: last ? JSON.stringify(last.output, null, 2) : "(no output)",
+          usage: { input_tokens: 0, output_tokens: 0 },
+        }
+      } else {
+        // Route to run — direct agent execution (no state machine)
+        result = await runEffect(
+          run(intent.arg, systemPrompt, undefined, false, onEvent) as unknown as Effect.Effect<{ text: string; usage: { input_tokens: number; output_tokens: number } }, never, never>
+        )
+      }
+
       setMsgs(prev => [...prev, {
         id: String(++idRef.current),
         role: "assistant",
-        text: sanitizeForTUI(result.text) || "(no response)",
+        text: result.text ? sanitizeForTUI(result.text) : "(no response)",
         tools: [...tools],
         usage: result.usage,
       }])
