@@ -6,9 +6,8 @@ import { fileURLToPath } from "node:url"
 import { createInterface } from "node:readline/promises"
 
 import { LLMLayer } from "./services/LLM.js"
-import { GateRegistry, makeGateRegistry } from "./services/GateRegistry.js"
+import { GateRegistryLayer } from "./services/GateRegistry.js"
 import { ToolRegistryLayer } from "./services/Tools.js"
-import { Logger, LoggerLayer } from "./services/Logger.js"
 import { BuiltinGatesLayer } from "./gates/builtin.js"
 import { PersistenceLayer } from "./machine/Persistence.js"
 import { Auth, AuthLayer } from "./auth/Auth.js"
@@ -23,19 +22,12 @@ const verbose = rawArgs.includes("--verbose")
 const filteredArgs = rawArgs.filter((a) => a !== "--verbose")
 const [cmd, ...rest] = filteredArgs
 
-// AppLayer wires Logger → GateRegistry → BuiltinGates (registers gates)
 const AppLayer = Layer.mergeAll(
-  LoggerLayer,
   LLMLayer,
-  Layer.effect(GateRegistry)(
-    Effect.gen(function* () {
-      const logger = yield* Logger
-      return makeGateRegistry(logger)
-    })
-  ),
+  GateRegistryLayer,
   ToolRegistryLayer,
   PersistenceLayer,
-  BuiltinGatesLayer
+  BuiltinGatesLayer.pipe(Layer.provide(GateRegistryLayer))
 )
 
 const loadContext = async (): Promise<string | undefined> => {
