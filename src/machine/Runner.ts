@@ -281,6 +281,31 @@ export const runSkill = (
         yield* Effect.promise(() => writeRelevantPaths({ files: ctx?.["files"] ?? [] }))
       }
 
+      // Branch state: verify branch was actually created by checking git branch --show-current
+      if (currentState === "branch") {
+        const branchOut = output as Record<string, unknown>
+        const expectedBranch = branchOut["branch"] as string | undefined
+        const verified = branchOut["verified"] as string | undefined
+
+        if (!expectedBranch) {
+          return yield* Effect.fail(new RunnerError("Branch state: missing 'branch' field in output"))
+        }
+
+        if (!verified) {
+          return yield* Effect.fail(new RunnerError("Branch state: missing 'verified' field — agent must run 'git branch --show-current' and include output"))
+        }
+
+        // Normalize: trim and compare (git branch --show-current may have trailing newline)
+        const normalizedVerified = verified.trim()
+        if (normalizedVerified !== expectedBranch) {
+          const msg = `Branch verification failed: expected '${expectedBranch}', got '${normalizedVerified}' from git branch --show-current`
+          console.error(`[gates] ✗ ${msg}`)
+          yield* persistence.record(runId, { type: "state_error", state: currentState, policy: "abort", retryCount, error: msg, ts: new Date().toISOString() })
+          return yield* Effect.fail(new RunnerError(msg))
+        }
+        console.error(`[gates] ✓ branch verified: ${normalizedVerified}`)
+      }
+
       // HITL Gate — pause and require human approval before advancing
       if (stateDef.hitl_pause && onHITL) {
         const approved = yield* Effect.promise(() => onHITL(currentState, output))

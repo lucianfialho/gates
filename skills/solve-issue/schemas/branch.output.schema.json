@@ -1,8 +1,12 @@
 {
   "type": "object",
-  "required": ["branch", "created"],
+  "required": ["branch", "created", "verified"],
   "properties": {
     "branch": { "type": "string" },
-    "created": { "type": "boolean" }
+    "created": { "type": "boolean" },
+    "verified": {
+      "type": "string",
+      "description": "The raw output from git branch --show-current — must equal the branch name"
+    }
   }
 }

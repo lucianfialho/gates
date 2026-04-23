@@ -1,9 +1,22 @@
 {
   "type": "object",
-  "required": ["files_changed", "summary", "typecheck_passed"],
+  "required": ["files_changed", "summary", "typecheck_passed", "metadata_staged"],
   "properties": {
-    "files_changed": { "type": "array", "items": { "type": "string" } },
-    "summary": { "type": "string" },
-    "typecheck_passed": { "type": "boolean" }
+    "files_changed": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "summary": {
+      "type": "string",
+      "description": "One sentence of what was done"
+    },
+    "typecheck_passed": {
+      "type": "boolean",
+      "description": "Whether bun run typecheck exited with code 0"
+    },
+    "metadata_staged": {
+      "type": "boolean",
+      "description": "Whether git add -A was run to stage metadata files (required for open_pr to succeed)"
+    }
   }
 }

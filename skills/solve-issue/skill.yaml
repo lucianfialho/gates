@@ -172,7 +172,7 @@ states:
   branch:
     description: |
       Create a feature branch for this issue.
-      GATE: branch created and checked out.
+      GATE: branch created and verified via git branch --show-current.
     agent_prompt: |
       Create and checkout a feature branch for this work.
 
@@ -185,15 +185,19 @@ states:
          - If issue_number is set: use "issue-{{outputs.analyze.issue_number}}"
          - Otherwise: use the PRP id (already slugified), max 40 chars
       2. Run: bash("git checkout -b <branch-name> 2>&1")
-      3. Confirm the branch was created with: bash("git branch --show-current")
+      3. VERIFY: Run bash("git branch --show-current") and capture the output
+      4. The output from step 3 MUST equal your branch name exactly
 
       GATE CONDITION: git branch --show-current must return your new branch name.
+      Include the raw output from git branch --show-current in your response.
 
       Respond with a JSON code block:
       ```json
       {
         "branch": "issue-42",
-        "created": true
+        "created": true,
+        "verified": "issue-42",
+        "verified_at": "git branch --show-current output"
       }
       ```
     output_schema: schemas/branch.output.schema.json
@@ -234,7 +238,11 @@ states:
       3. If you need to touch a file NOT in context.files, STOP — it means
          the PRP is incomplete. Report which file and why, don't proceed.
       4. Update .metadata/summary.yaml for each directory touched
-      5. Run: bash("bun run typecheck 2>&1") — fix until exit 0
+      5. Stage all modified files including metadata: bash("git add -A") — CRITICAL: this stages .metadata/summary.yaml files so the metadata gate won't block the commit in open_pr
+      6. Run: bash("bun run typecheck 2>&1") — fix until exit 0
+
+      IMPORTANT: Step 5 (git add -A) is required to ensure metadata files are staged.
+      Without this, the metadata gate will block the commit in open_pr state.
 
       GATE CONDITION: typecheck exits 0, only contract files modified.
 
@@ -243,7 +251,8 @@ states:
       {
         "files_changed": ["path/to/file.ts"],
         "summary": "one sentence of what was done",
-        "typecheck_passed": true
+        "typecheck_passed": true,
+        "metadata_staged": true
       }
       ```
     output_schema: schemas/implement.output.schema.json
@@ -297,16 +306,22 @@ states:
       Branch: {{outputs.branch.branch}}
       Summary: {{outputs.implement.summary}}
       Files changed: {{outputs.implement.files_changed}}
+      Metadata staged: {{outputs.implement.metadata_staged}}
       Issue number: {{outputs.analyze.issue_number}}
       Issue title: {{outputs.analyze.issue_title}}
 
+      NOTE: The implement state should have already staged all files including
+      metadata files. If the commit fails with metadata gate error, stage
+      any missing files with bash("git add -A") before retrying.
+
       Steps:
-      1. Stage all changed files: bash("git add <files>")
-      2. Commit: bash("git commit -m '<summary>'")
-         The metadata gate will block if .metadata/summary.yaml is not staged —
-         if it blocks, stage the missing summary files and retry the commit.
-      3. Push: bash("git push -u origin {{outputs.branch.branch}} 2>&1")
-      4. Create PR with gh_pr_create:
+      1. Check staged files: bash("git diff --cached --name-only")
+      2. If implement staged metadata, proceed to step 3. Otherwise:
+         - Run: bash("git add -A") to stage all including metadata
+      3. Commit: bash("git commit -m '<summary>'")
+         - If metadata gate blocks, stage missing files and retry
+      4. Push: bash("git push -u origin {{outputs.branch.branch}} 2>&1")
+      5. Create PR with gh_pr_create:
          - title: "{{outputs.analyze.issue_title}}"
          - body: include summary, what was changed, and "Closes #{{outputs.analyze.issue_number}}" if issue_number is set
          - base: "main"
