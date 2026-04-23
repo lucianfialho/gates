@@ -1,0 +1,7 @@
+id: gates-config
+title: Provider and model configuration — GatesConfig reads .gates/config.yaml
+covers:
+  - src/config/GatesConfig.ts
+specialist: config
+last_updated: 2026-04-23
+status: filled

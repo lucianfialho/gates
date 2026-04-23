@@ -30,5 +30,9 @@ indexed_directories:
     specialist: context
   - path: src/auth
     specialist: auth
+  - path: src/chat
+    specialist: chat-tui
+  - path: src/config
+    specialist: config
   - path: skills
     specialist: skills

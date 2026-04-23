@@ -86,6 +86,29 @@ const searchRelatedIssues = (query: string): Effect.Effect<RelatedIssue[]> =>
     }
   })
 
+// ── Knowledge Architect: relevance scoring ────────────────────────────────────
+
+const scoreRelevance = (summary: MetadataSummary, issue: string): number => {
+  const issueWords = issue.toLowerCase().split(/\W+/).filter(w => w.length > 3)
+  const fields = [
+    summary.title ?? "",
+    summary.specialist ?? "",
+    ...(summary.covers ?? []),
+  ].join(" ").toLowerCase()
+
+  let score = 0
+  for (const word of issueWords) {
+    if (fields.includes(word)) score += 2
+  }
+  // Bonus for explicit file path matches in the issue text
+  const filePattern = /(?:src|skills)\/[\w/.-]+\.(?:ts|tsx|yaml)/g
+  const issueFiles = issue.match(filePattern) ?? []
+  for (const f of issueFiles) {
+    if ((summary.covers ?? []).some(c => c.includes(f) || f.includes(c))) score += 10
+  }
+  return score
+}
+
 // ── main builder ─────────────────────────────────────────────────────────────
 
 export const buildResearchContext = (issue: string): Effect.Effect<ResearchContext> =>
@@ -99,9 +122,15 @@ export const buildResearchContext = (issue: string): Effect.Effect<ResearchConte
       (d) => readMetadataSummary(d.path),
       { concurrency: "unbounded" }
     )
-    const summaries = rawSummaries.filter((s): s is MetadataSummary => s !== null)
+    const allSummaries = rawSummaries.filter((s): s is MetadataSummary => s !== null)
 
-    // Search GitHub for related issues in parallel with metadata load
+    // Knowledge Architect: rank by relevance, inject only top-N (not all 7)
+    const scored = allSummaries
+      .map(s => ({ s, score: scoreRelevance(s, issue) }))
+      .sort((a, b) => b.score - a.score)
+    const summaries = scored.filter((x, i) => i < 3 || x.score > 0).map(x => x.s)
+
+    // Search GitHub for related issues in parallel
     const related = yield* searchRelatedIssues(issue)
 
     return { summaries, related, built_at: new Date().toISOString() }
@@ -110,7 +139,7 @@ export const buildResearchContext = (issue: string): Effect.Effect<ResearchConte
 // ── prompt formatter ──────────────────────────────────────────────────────────
 
 export const formatResearchContext = (ctx: ResearchContext): string => {
-  const lines: string[] = ["=== Project metadata (pre-loaded) ==="]
+  const lines: string[] = ["=== Project metadata (ranked by relevance) ==="]
 
   for (const s of ctx.summaries) {
     lines.push(`\n${s.dir}/`)
