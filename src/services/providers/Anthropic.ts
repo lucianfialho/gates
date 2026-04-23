@@ -17,7 +17,10 @@ export const makeAnthropicProvider = (apiKey: string): LLMShape => {
         client.messages.create({
           model: MODEL(),
           max_tokens: 8096,
-          ...(system ? { system } : {}),
+          // cache_control ephemeral on system prompt — reduces cost ~80% on repeated turns within session
+          ...(system ? {
+            system: [{ type: "text" as const, text: system, cache_control: { type: "ephemeral" as const } }]
+          } : {}),
           tools: tools.map((t) => ({
             name: t.name,
             description: t.description,

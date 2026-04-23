@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises"
 import { join, dirname } from "node:path"
 import { loadSkill, interpolate, resolveTransition, type Skill, SkillError } from "./Skill.js"
 import { Persistence } from "./Persistence.js"
-import { run as runAgent, type RunResult } from "../agent/Loop.js"
+import { run as runAgent, type RunResult, type ChatEvent } from "../agent/Loop.js"
 import { LLMService } from "../services/LLM.js"
 import { GateRegistry } from "../services/GateRegistry.js"
 import { ToolRegistry } from "../services/Tools.js"
@@ -56,7 +56,8 @@ export const runSkill = (
   inputs: Record<string, string> = {},
   systemContext?: string,
   verbose?: boolean,
-  onHITL?: HITLCallback
+  onHITL?: HITLCallback,
+  onEvent?: (event: ChatEvent) => void
 ): Effect.Effect<Record<string, StateResult>, RunnerError | SkillError | AgentError | GateError, RunnerDeps> =>
   Effect.gen(function* () {
     const skill = yield* loadSkill(skillPath)
@@ -73,6 +74,9 @@ export const runSkill = (
     let totalOutput = 0
     let retryCount = 0
 
+    const nonTerminalStates = Object.entries(skill.states)
+      .filter(([, s]) => !s.terminal).length
+
     while (steps++ < MAX_STEPS) {
       const stateDef = skill.states[currentState]
       if (!stateDef) {
@@ -80,6 +84,10 @@ export const runSkill = (
       }
 
       if (stateDef.terminal) break
+
+      // Emit state change so TUI can show current phase
+      const stateStep = Object.keys(skill.states).indexOf(currentState) + 1
+      onEvent?.({ type: "state_change", state: currentState, step: stateStep, total: nonTerminalStates })
 
       const statePrompt = interpolate(stateDef.agent_prompt, {
         inputs,
@@ -133,13 +141,13 @@ export const runSkill = (
       const agentEffect = stateDef.timeout_ms
         ? Effect.promise(() =>
             Promise.race([
-              Effect.runPromise(runAgent(fullPrompt, stateSystem, runId, verbose) as Effect.Effect<{ text: string; usage: { input_tokens: number; output_tokens: number } }, never, never>),
+              Effect.runPromise(runAgent(fullPrompt, stateSystem, runId, verbose, onEvent) as Effect.Effect<{ text: string; usage: { input_tokens: number; output_tokens: number } }, never, never>),
               new Promise<never>((_, reject) =>
                 setTimeout(() => reject(new Error(`State "${currentState}" timed out after ${stateDef.timeout_ms}ms`)), stateDef.timeout_ms!)
               ),
             ])
           ).pipe(Effect.mapError((e) => new RunnerError(`Timeout in state ${currentState}`, e)))
-        : runAgent(fullPrompt, stateSystem, runId, verbose).pipe(
+        : runAgent(fullPrompt, stateSystem, runId, verbose, onEvent).pipe(
             Effect.mapError((e): RunnerError => e instanceof RunnerError ? e : new RunnerError(`Agent failed in state ${currentState}`, e))
           )
 
@@ -298,6 +306,22 @@ export const runSkill = (
       total_output_tokens: totalOutput,
       ts: new Date().toISOString(),
     })
+
+    // Record cache metrics if available
+    const llm = yield* LLMService
+    if (llm.getCacheMetrics) {
+      const metrics = yield* llm.getCacheMetrics()
+      yield* persistence.record(runId, {
+        type: "cache_metrics",
+        metrics: {
+          cache_hits: metrics.cacheHits,
+          cache_invalidations: metrics.cacheInvalidations,
+          tokens_cached: metrics.tokensCached,
+        },
+        ts: new Date().toISOString(),
+      })
+    }
+
     console.error(`[gates] skill total: ${totalInput} in / ${totalOutput} out`)
 
     // Update project context for future runs (best-effort)

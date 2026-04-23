@@ -143,7 +143,8 @@ export type ChatEvent =
   | { type: "tool_call"; name: string; input: unknown }
   | { type: "tool_result"; id: string; content: string }
   | { type: "gate_block"; gate: string; reason: string }
-  | { type: "thinking"; text: string }   // intermediate agent text between tool calls
+  | { type: "thinking"; text: string }
+  | { type: "state_change"; state: string; step: number; total: number }
   | { type: "text"; text: string }
   | { type: "done"; usage: { input_tokens: number; output_tokens: number } }
 

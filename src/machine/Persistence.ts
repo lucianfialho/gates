@@ -5,6 +5,13 @@ import type { Message } from "../services/LLM.js"
 import type { ToolCall } from "../gates/Gate.js"
 import type { ToolResult } from "../services/Tools.js"
 
+// --- Cache metrics type ---
+export interface CacheMetrics {
+  cache_hits: number
+  cache_invalidations: number
+  tokens_cached: number
+}
+
 // --- event types written to the JSONL run file ---
 
 export type RunEvent =
@@ -18,6 +25,7 @@ export type RunEvent =
   | { type: "run_complete"; result: string; total_input_tokens: number; total_output_tokens: number; ts: string; duration?: number }
   | { type: "run_failed"; error: string; ts: string }
   | { type: "state_error"; state: string; policy: string; retryCount: number; error: string; ts: string }
+  | { type: "cache_metrics"; metrics: CacheMetrics; ts: string }
 
 export interface PersistenceShape {
   readonly initRun: (prompt: string, parentRunId?: string) => Effect.Effect<string>

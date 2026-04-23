@@ -29,12 +29,19 @@ export interface LLMResponse {
   usage: { input_tokens: number; output_tokens: number }
 }
 
+export interface CacheMetrics {
+  cacheHits: number
+  cacheInvalidations: number
+  tokensCached: number
+}
+
 export interface LLMShape {
   readonly complete: (
     messages: Message[],
     tools: ToolDef[],
     system?: string
   ) => Effect.Effect<LLMResponse, LLMError>
+  readonly getCacheMetrics?: () => Effect.Effect<CacheMetrics>
 }
 
 export class LLMService extends Context.Service<LLMService, LLMShape>()(

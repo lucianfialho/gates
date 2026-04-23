@@ -53,6 +53,7 @@ export const App = ({ runEffect, systemPrompt }: {
   const [liveLines, setLiveLines] = useState<Array<{ icon: string; text: string; dim: boolean }>>([])
   const MAX_LIVE = 5
   const [status, setStatus] = useState<"idle" | "thinking" | "hitl">("idle")
+  const [currentState, setCurrentState] = useState<{ name: string; step: number; total: number } | null>(null)
   const [hitl, setHitl]     = useState<{ state: string; output: unknown; isError: boolean; resolve: (v: boolean) => void } | null>(null)
   const idRef               = useRef(0)
 
@@ -108,6 +109,10 @@ export const App = ({ runEffect, systemPrompt }: {
       setLiveLines(prev => [...prev.slice(-(MAX_LIVE - 1)), { icon, text, dim }])
 
     const onEvent = (ev: ChatEvent) => {
+      if (ev.type === "state_change") {
+        setCurrentState({ name: ev.state, step: ev.step, total: ev.total })
+        addLive("◎", `[${ev.state}]  ${ev.step}/${ev.total}`, false)
+      }
       if (ev.type === "thinking") {
         const cleaned = stripThinking(ev.text).slice(0, 100).replace(/\n/g, " ")
         if (cleaned) addLive("…", cleaned, true)
@@ -153,6 +158,7 @@ export const App = ({ runEffect, systemPrompt }: {
     }
 
     setLiveLines([])
+    setCurrentState(null)
     setStatus("idle")
   }, [status, runEffect, systemPrompt, chatHITL])
 
@@ -162,6 +168,8 @@ export const App = ({ runEffect, systemPrompt }: {
 
   const statusText =
     status === "hitl"     ? "approval required — Y / N" :
+    status === "thinking" && currentState
+      ? `[${currentState.name}]  ${currentState.step}/${currentState.total}` :
     status === "thinking" ? "thinking…" :
     "ready  ·  ESC to quit"
 

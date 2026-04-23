@@ -138,12 +138,16 @@ const runStats = async () => {
 
   type Row = { ts: string; prompt: string; tin: number; tout: number; cost: number }
   const rows: Row[] = []
+  let totalCacheHits = 0
+  let totalCacheInvalidations = 0
+  let totalTokensCached = 0
 
   for (const file of files) {
     const lines = (await readFile(join(runsDir, file), "utf-8")).split("\n").filter(Boolean)
     const parsed = lines.map((l) => { try { return JSON.parse(l) as Record<string, unknown> } catch { return null } }).filter(Boolean)
     const start = parsed.find((e) => e!.type === "run_start") as { prompt: string; ts: string; parentRunId?: string } | undefined
     const complete = parsed.find((e) => e!.type === "run_complete") as { total_input_tokens: number; total_output_tokens: number } | undefined
+    const cacheMetrics = parsed.find((e) => e!.type === "cache_metrics") as { metrics: { cache_hits: number; cache_invalidations: number; tokens_cached: number } } | undefined
     if (!start || !complete) continue
     if (start.parentRunId) continue  // sub-run of a skill — skip, already counted in parent
     const tin = Number(complete.total_input_tokens) || 0
@@ -155,6 +159,13 @@ const runStats = async () => {
       ? (start.prompt.split(" inputs:")[0] ?? start.prompt)
       : start.prompt.slice(0, 55).replace(/\n/g, " ")
     rows.push({ ts: start.ts, prompt: label, tin, tout, cost })
+
+    // Accumulate cache metrics
+    if (cacheMetrics?.metrics) {
+      totalCacheHits += cacheMetrics.metrics.cache_hits || 0
+      totalCacheInvalidations += cacheMetrics.metrics.cache_invalidations || 0
+      totalTokensCached += cacheMetrics.metrics.tokens_cached || 0
+    }
   }
 
   rows.sort((a, b) => a.ts.localeCompare(b.ts))
@@ -171,6 +182,14 @@ const runStats = async () => {
   }
   console.log("─".repeat(90))
   console.log(`${"TOTAL".padEnd(12)} ${String(totalIn).padStart(8)} ${String(totalOut).padStart(8)} ${totalCost.toFixed(4).padStart(8)}`)
+
+  // Print cache metrics if available
+  if (totalCacheHits > 0 || totalCacheInvalidations > 0 || totalTokensCached > 0) {
+    console.log("\nCache Metrics:")
+    console.log(`  cache_hits:          ${totalCacheHits}`)
+    console.log(`  cache_invalidations: ${totalCacheInvalidations}`)
+    console.log(`  tokens_cached:       ${totalTokensCached}`)
+  }
   console.log()
 }
 
@@ -219,6 +238,8 @@ const runLogs = async (runId?: string) => {
       } else if (type === "tool_result") {
         const { value, originalLength } = truncate(ev!.content, 60)
         detail = `content="${value}"${originalLength > 60 ? ` [${originalLength} chars]` : ""}`
+      } else if (type === "cache_metrics") {
+        detail = `cache_hits=${ev!.cache_hits} cache_invalidations=${ev!.cache_invalidations} tokens_cached=${ev!.tokens_cached}`
       } else {
         // Render remaining fields except type, ts, and known fields
         const rest2 = Object.entries(ev!).filter(([k]) => !["type", "ts", "gate", "tool", "duration"].includes(k))
