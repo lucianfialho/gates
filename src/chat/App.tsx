@@ -189,13 +189,18 @@ export const App = ({ runEffect, systemPrompt }: {
         usage: result.usage,
       }])
     } catch (e) {
-      const errText =
-        e instanceof Error ? e.message :
-        typeof e === "object" && e !== null && "cause" in e ? String((e as { cause: unknown }).cause) :
-        typeof e === "object" && e !== null && "reason" in e ? String((e as { reason: unknown }).reason) :
-        typeof e === "object" && e !== null && "message" in e ? String((e as { message: unknown }).message) :
-        typeof e === "object" ? JSON.stringify(e) :
-        String(e)
+      const formatErr = (err: unknown): string => {
+        if (err instanceof Error) return err.message
+        if (typeof err !== "object" || err === null) return String(err)
+        const o = err as Record<string, unknown>
+        // RunnerError / GateError / AgentError — Effect tagged errors
+        if (o["_tag"] && o["reason"]) return `${o["_tag"]}: ${o["reason"]}${o["cause"] ? `\n  caused by: ${formatErr(o["cause"])}` : ""}`
+        if (o["_tag"] && o["cause"])  return `${o["_tag"]}: ${formatErr(o["cause"])}`
+        if (o["reason"])  return String(o["reason"])
+        if (o["message"]) return String(o["message"])
+        return JSON.stringify(err, null, 2).slice(0, 300)
+      }
+      const errText = formatErr(e)
       setMsgs(prev => [...prev, {
         id: String(++idRef.current),
         role: "assistant",
