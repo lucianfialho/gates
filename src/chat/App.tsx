@@ -1,9 +1,10 @@
-import React, { useState, useCallback, useRef } from "react"
+import React, { useState, useCallback, useRef, useEffect } from "react"
 import { useKeyboard, useRenderer } from "@opentui/react"
 import { Effect } from "effect"
 import { join } from "node:path"
 import { run, type ChatEvent } from "../agent/Loop.js"
 import { runSkill, type HITLCallback } from "../machine/Runner.js"
+import { getProviderConfig } from "../config/GatesConfig.js"
 
 // ── intent routing ────────────────────────────────────────────────────────────
 
@@ -65,7 +66,13 @@ export const App = ({ runEffect, systemPrompt }: {
   const [currentState, setCurrentState] = useState<{ name: string; step: number; total: number } | null>(null)
   const [hitl, setHitl]     = useState<{ state: string; output: unknown; isError: boolean; resolve: (v: boolean) => void } | null>(null)
   const [runStats, setRunStats] = useState<{ totalIn: number; totalOut: number; startMs: number } | null>(null)
+  const [modelInfo, setModelInfo] = useState<string>("")
   const idRef               = useRef(0)
+
+  // Load provider:model from config on mount
+  useEffect(() => {
+    getProviderConfig().then(cfg => setModelInfo(`${cfg.provider}:${cfg.model}`))
+  }, [])
 
   useKeyboard((key) => {
     if (status === "hitl" && hitl) {
@@ -225,7 +232,7 @@ export const App = ({ runEffect, systemPrompt }: {
     if (totalIn === 0 && totalOut === 0) return `  ⏱ ${elapsedStr}`
     // MiniMax pricing: $0.30/MTok in, $1.20/MTok out
     const cost = (totalIn / 1_000_000) * 0.30 + (totalOut / 1_000_000) * 1.20
-    return `${(totalIn / 1000).toFixed(0)}k in · ${(totalOut / 1000).toFixed(0)}k out · $${cost.toFixed(4)} · ${elapsedStr}`
+    return `${(totalIn / 1000).toFixed(0)}k in · ${(totalOut / 1000).toFixed(0)}k out · ${cost.toFixed(2)} · ${elapsedStr}`
   })()
 
   const rows = process.stdout.rows ?? 24
@@ -315,11 +322,12 @@ export const App = ({ runEffect, systemPrompt }: {
         </box>
       )}
 
-      {/* status bar — token usage + elapsed time */}
+      {/* status bar — token usage + elapsed time + provider:model */}
       {statsBar && (
         <box flexDirection="row" paddingX={2} height={1}>
           <box flexGrow={1} />
           <text fg="#444444">{statsBar}</text>
+          {modelInfo && <><text fg="#444444"> · </text><text fg="#555555">{modelInfo}</text></>}
         </box>
       )}
 
