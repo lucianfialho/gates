@@ -162,17 +162,23 @@ export const App = ({ runEffect, systemPrompt }: {
     status === "thinking" ? "thinking…" :
     "ready  ·  ESC to quit"
 
-  return (
-    <box flexDirection="column" height={process.stdout.rows ?? 24} width={process.stdout.columns ?? 80}>
+  const rows = process.stdout.rows ?? 24
+  const cols = process.stdout.columns ?? 80
+  const HEADER_H = 3   // 1 padding + 1 text + 1 border
+  const INPUT_H = 3    // 1 border top + 1 text + 1 border bottom
+  const scrollH = rows - HEADER_H - INPUT_H
 
-      {/* header */}
-      <box flexDirection="row" padding={1} gap={2} border={["bottom"]} borderStyle="single">
+  return (
+    <box flexDirection="column" height={rows} width={cols}>
+
+      {/* header — fixed 3 rows */}
+      <box flexDirection="row" height={HEADER_H} paddingX={1} paddingY={1} gap={2} border={["bottom"]} borderStyle="single">
         <text><b fg="#00CFCF">gates</b></text>
         <text fg="#555555">{statusText}</text>
       </box>
 
       {/* messages */}
-      <scrollbox flexGrow={1} paddingX={1} paddingY={1}>
+      <scrollbox height={scrollH} paddingX={1} paddingY={1}>
         {msgs.map((msg) => (
           <box key={msg.id} flexDirection="column" marginBottom={1}>
             {msg.role === "user" ? (
@@ -242,9 +248,10 @@ export const App = ({ runEffect, systemPrompt }: {
         </box>
       )}
 
-      {/* input area */}
+      {/* input area — fixed 3 rows */}
       <box
         flexDirection="row"
+        height={INPUT_H}
         border
         borderStyle="single"
         borderColor={borderColor}
