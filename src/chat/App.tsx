@@ -107,10 +107,17 @@ export const App = ({ runEffect, systemPrompt }: {
         usage: result.usage,
       }])
     } catch (e) {
+      const errText =
+        e instanceof Error ? e.message :
+        typeof e === "object" && e !== null && "cause" in e ? String((e as { cause: unknown }).cause) :
+        typeof e === "object" && e !== null && "reason" in e ? String((e as { reason: unknown }).reason) :
+        typeof e === "object" && e !== null && "message" in e ? String((e as { message: unknown }).message) :
+        typeof e === "object" ? JSON.stringify(e) :
+        String(e)
       setMsgs(prev => [...prev, {
         id: String(++idRef.current),
         role: "assistant",
-        text: e instanceof Error ? e.message : String(e),
+        text: errText,
         tools: [...tools],
         error: true,
       }])
