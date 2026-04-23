@@ -118,12 +118,13 @@ export const runSkill = (
   systemContext?: string,
   verbose?: boolean,
   onHITL?: HITLCallback,
-  onEvent?: (event: ChatEvent) => void
+  onEvent?: (event: ChatEvent) => void,
+  resumeOutputs?: Record<string, StateResult>
 ): Effect.Effect<Record<string, StateResult>, RunnerError | SkillError | AgentError | GateError, RunnerDeps> =>
   Effect.gen(function* () {
     const skill = yield* loadSkill(skillPath)
     const skillDir = dirname(skillPath)
-    const outputs: Record<string, StateResult> = {}
+    const outputs: Record<string, StateResult> = resumeOutputs ? { ...resumeOutputs } : {}
     const persistence = yield* Persistence
 
     const runId = yield* persistence.initRun(`skill:${skill.id} inputs:${JSON.stringify(inputs)}`)

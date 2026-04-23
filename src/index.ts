@@ -318,6 +318,67 @@ const main = async () => {
     return
   }
 
+  if (cmd === "resume") {
+    const runIdPrefix = rest[0]
+    if (!runIdPrefix) { console.error("Usage: gates resume <run-id>"); process.exit(1) }
+
+    const runsDir = join(process.cwd(), ".gates", "runs")
+    const files = (await readdir(runsDir).catch(() => [])).filter(f => f.endsWith(".jsonl"))
+    const match = files.find(f => f === `${runIdPrefix}.jsonl` || f.startsWith(runIdPrefix))
+    if (!match) { console.error(`No run found matching: ${runIdPrefix}`); process.exit(1) }
+
+    const lines = (await readFile(join(runsDir, match), "utf-8")).split("\n").filter(Boolean)
+    const events = lines.map(l => { try { return JSON.parse(l) as Record<string, unknown> } catch { return null } }).filter(Boolean)
+
+    // Recover original inputs and skill path from run_start
+    const start = events.find(e => e!.type === "run_start") as { prompt: string } | undefined
+    const promptStr = start?.prompt ?? ""
+    const skillMatch = /skill:([\w/-]+)/.exec(promptStr)
+    const inputsMatch = /inputs:(\{.+\})$/.exec(promptStr)
+    const recoveredInputs = inputsMatch?.[1] ? JSON.parse(inputsMatch[1]) as Record<string, string> : {}
+    const skillName = skillMatch?.[1] ?? "solve-issue"
+    const skillPath = join(__dirname, "..", "skills", skillName.replace(/^skill:/, ""), "skill.yaml")
+
+    // Reconstruct outputs from completed states
+    const resumeOutputs: Record<string, { state: string; output: unknown; agentText: string }> = {}
+    let failedState = ""
+    for (const ev of events) {
+      if (ev!.type === "state_complete") {
+        const e = ev as { state: string; output: unknown; agentText: string }
+        resumeOutputs[e.state] = { state: e.state, output: e.output, agentText: e.agentText ?? "" }
+      }
+      if (ev!.type === "state_error") {
+        failedState = (ev as { state: string }).state
+      }
+    }
+
+    if (!failedState) { console.error("Run completed successfully — nothing to resume."); process.exit(0) }
+
+    const completedStates = Object.keys(resumeOutputs)
+    console.error(`[resume] run=${match.slice(0, 8)} skill=${skillName}`)
+    console.error(`[resume] completed: ${completedStates.join(" → ")}`)
+    console.error(`[resume] resuming at: ${failedState}`)
+
+    const systemPrompt = await loadContext()
+    const effect = runSkill(
+      resolve(skillPath),
+      { ...recoveredInputs, initial_state_override: failedState },
+      systemPrompt,
+      verbose,
+      cliHITL,
+      undefined,
+      resumeOutputs
+    ).pipe(
+      Effect.tap((results) => Effect.sync(() => {
+        const last = Object.values(results).at(-1)
+        if (last) console.log(JSON.stringify(last.output, null, 2))
+      })),
+      Effect.provide(AppLayer)
+    )
+    await Effect.runPromise(effect as any)
+    return
+  }
+
   if (cmd === "auth") {
     await Effect.runPromise(runAuth(rest))
     return
