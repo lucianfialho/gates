@@ -377,30 +377,65 @@ export const App = ({ runEffect, systemPrompt }: {
         )}
       </scrollbox>
 
-      {/* HITL overlay — plan approval or error escalation */}
-      {status === "hitl" && hitl && (
-        <box
-          flexDirection="column"
-          border
-          borderStyle="rounded"
-          borderColor={hitl.isError ? "#FF4444" : "#AA44FF"}
-          paddingX={2}
-          paddingY={1}
-          marginX={2}
-          marginBottom={1}
-        >
-          <text><b fg={hitl.isError ? "#FF4444" : "#AA44FF"}>
-            {hitl.isError ? "🚨  Error — state: " : "✋  Approval required — state: "}{hitl.state}
-          </b></text>
-          <text fg="#333333">{"─".repeat((termSize.cols) - 8)}</text>
-          <text>{JSON.stringify(hitl.output, null, 2)}</text>
-          <text fg="#333333">{"─".repeat((termSize.cols) - 8)}</text>
-          <box flexDirection="row" gap={3} marginTop={1}>
-            <text><b fg="#44AA44">[Y] {hitl.isError ? "Retry" : "Proceed"}</b></text>
-            <text><b fg="#FF4444">[N] {hitl.isError ? "Skip state" : "Abort"}</b></text>
+      {/* HITL overlay — readable PRP format */}
+      {status === "hitl" && hitl && (() => {
+        const o = hitl.output as Record<string, unknown> | null
+        const isPRP = !hitl.isError && o && ("context" in o || "spec" in o)
+        const ctx = isPRP ? o!["context"] as Record<string, unknown> : null
+        const spec = isPRP ? o!["spec"] as Record<string, unknown> : null
+        const acc = isPRP ? o!["acceptance"] as string[] | undefined : undefined
+        const div = "─".repeat(Math.max(10, termSize.cols - 8))
+        const files = ctx && Array.isArray(ctx["files"]) ? ctx["files"] as string[] : []
+        const changes = spec && Array.isArray(spec["changes"]) ? spec["changes"] as Array<Record<string,unknown>> : []
+        const constraints = spec && Array.isArray(spec["constraints"]) ? spec["constraints"] as string[] : []
+
+        return (
+          <box flexDirection="column" border borderStyle="rounded"
+            borderColor={hitl.isError ? "#FF4444" : "#AA44FF"}
+            paddingX={2} paddingY={1} marginX={2} marginBottom={1}>
+
+            <text><b fg={hitl.isError ? "#FF4444" : "#AA44FF"}>
+              {hitl.isError ? "🚨  Error" : "✋  Approve plan"} — {hitl.state}
+            </b></text>
+            <text fg="#555555">{div}</text>
+
+            {isPRP && ctx ? (
+              <box flexDirection="column">
+                {!!o!["issue_title"] && <text fg="#CCCCCC"><b fg="#FFFFFF">Issue: </b>{String(o!["issue_title"])}</text>}
+                {!!ctx["summary"] && <text fg="#CCCCCC"><b fg="#FFFFFF">Why: </b>{String(ctx["summary"])}</text>}
+                {files.length > 0 && <box flexDirection="column">
+                  <text><b fg="#FFFFFF">Files:</b></text>
+                  {files.map((f, i) => <text key={i} fg="#88CCFF">  • {f}</text>)}
+                </box>}
+                {changes.length > 0 && <box flexDirection="column">
+                  <text><b fg="#FFFFFF">Changes:</b></text>
+                  {changes.map((c, i) => <text key={i} fg="#AAFFAA">  • {String(c["file"])}: {String(c["description"] ?? "").slice(0, termSize.cols - 20)}</text>)}
+                </box>}
+                {constraints.length > 0 && <box flexDirection="column">
+                  <text><b fg="#FFFFFF">Constraints:</b></text>
+                  {constraints.map((c, i) => <text key={i} fg="#FFCC88">  ⚠ {c.slice(0, termSize.cols - 20)}</text>)}
+                </box>}
+                {acc && acc.length > 0 && <box flexDirection="column">
+                  <text><b fg="#FFFFFF">Acceptance:</b></text>
+                  {acc.map((a, i) => <text key={i} fg="#88FF88">  ✓ {a.slice(0, termSize.cols - 20)}</text>)}
+                </box>}
+              </box>
+            ) : (
+              <text fg="#CCCCCC">{
+                hitl.isError
+                  ? String((o as Record<string,unknown> | null)?.["error"] ?? JSON.stringify(o).slice(0, 300))
+                  : JSON.stringify(o, null, 2).slice(0, 400)
+              }</text>
+            )}
+
+            <text fg="#555555">{div}</text>
+            <box flexDirection="row" gap={3} marginTop={1}>
+              <text><b fg="#44AA44">[Y] {hitl.isError ? "Retry" : "Approve & implement"}</b></text>
+              <text><b fg="#FF4444">[N] {hitl.isError ? "Skip" : "Abort"}</b></text>
+            </box>
           </box>
-        </box>
-      )}
+        )
+      })()}
 
       {/* status bar — token usage + elapsed time + provider:model */}
       {(statsBar || modelInfo) && (
