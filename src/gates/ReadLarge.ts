@@ -21,12 +21,26 @@ const countLines = (path: string): number => {
   }
 }
 
+// Paths exempt from the large-file gate — always safe to read whole
+const EXEMPT = [
+  ".metadata/",
+  ".gates/",
+  "package.json",
+  "tsconfig",
+  ".yaml",
+  ".yml",
+  ".md",
+]
+
+const isExempt = (path: string) =>
+  EXEMPT.some(pat => path.includes(pat))
+
 export const readLargeGate: Gate = {
   name: "read-large",
   matches: (call: ToolCall) => call.name === "read",
   check: (call: ToolCall) => {
     const { path } = call.input as { path?: string }
-    if (!path) return pass
+    if (!path || isExempt(path)) return pass
 
     const lines = countLines(path)
     if (lines <= MAX_LINES) return pass
