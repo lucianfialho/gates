@@ -17,7 +17,7 @@ const now = () => new Date().toISOString()
 // Replace stale file-read results with a placeholder so they don't
 // accumulate in the message history across many tool-call rounds.
 // Tracks tool calls that produced large content — elided after staleAfterTurns
-const elideStaleReads = (messages: Message[], staleAfterTurns = 2): Message[] => {
+const elideStaleReads = (messages: Message[], staleAfterTurns = 1): Message[] => {
   const toolLabels = new Map<string, string>()
   for (const msg of messages) {
     if (msg.role === "assistant") {
