@@ -12,6 +12,7 @@ import { GateError } from "../gates/Gate.js"
 import { buildContextPrompt, updateContextFile } from "../context/ProjectContext.js"
 import { writeRelevantPaths } from "../context/RelevantPaths.js"
 import { buildResearchContext, formatResearchContext } from "../context/ResearchContext.js"
+import { clearReadHistory } from "../gates/ReadDedup.js"
 import { validate } from "./schema_validate.js"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
@@ -200,6 +201,9 @@ export const runSkill = (
       }
 
       if (stateDef.terminal) break
+
+      // Reset read-dedup history so each state starts fresh
+      clearReadHistory()
 
       // Emit state change so TUI can show current phase
       const stateStep = Object.keys(skill.states).indexOf(currentState) + 1

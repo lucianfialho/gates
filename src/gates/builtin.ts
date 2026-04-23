@@ -5,6 +5,7 @@ import { bashSafetyGate } from "./BashSafety.js"
 import { metadataGate } from "./Metadata.js"
 import { selectiveContextGate } from "./ContextScope.js"
 import { readLargeGate } from "./ReadLarge.js"
+import { readDedupGate } from "./ReadDedup.js"
 import type { GatesConfig } from "../config/GatesConfig.js"
 import type { ProjectContext } from "../context/ProjectContext.js"
 
@@ -35,5 +36,6 @@ export const BuiltinGatesLayer = Layer.effectDiscard(
     registry.register(metadataGate)
     registry.register(selectiveContextGate)
     registry.register(readLargeGate)
+    registry.register(readDedupGate)
   })
 )
