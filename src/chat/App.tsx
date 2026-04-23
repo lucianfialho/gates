@@ -168,8 +168,17 @@ export const App = ({ runEffect, systemPrompt }: {
       let result: { text?: string; usage: { input_tokens: number; output_tokens: number } }
 
       if (skillPath && intent.type === "skill") {
-        // Route to runSkill — full state machine with HITL and onEvent
-        const inputs: Record<string, string> = { issue: intent.arg }
+        // Capture recent conversation as context — replaces research rediscovery
+        const chatContext = msgs
+          .slice(-8)
+          .filter(m => m.text.length > 20)
+          .map(m => `${m.role === "user" ? "human" : "assistant"}: ${m.text.slice(0, 400)}`)
+          .join("\n\n")
+
+        const inputs: Record<string, string> = {
+          issue: intent.arg,
+          ...(chatContext ? { chat_context: chatContext } : {}),
+        }
         const skillResult = await runEffect(
           runSkill(skillPath, inputs, systemPrompt, false, chatHITL, onEvent) as unknown as Effect.Effect<Record<string, { output: unknown }>, never, never>
         ) as Record<string, { output: unknown }>

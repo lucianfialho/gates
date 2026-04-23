@@ -12,6 +12,10 @@ inputs:
     - name: issue
       type: string
       description: GitHub issue number (e.g. "42") or plain text description
+  optional:
+    - name: chat_context
+      type: string
+      description: Recent conversation context — if present, use it to skip file rediscovery
 
 states:
   clarify:
@@ -72,18 +76,21 @@ states:
 
       Issue: {{inputs.issue}}
 
-      The metadata index and related issues are already loaded in your system prompt.
-      Do NOT make tool calls to read files — the context is pre-loaded for you.
+      {{inputs.chat_context}}
 
-      Your job:
+      IMPORTANT: If the section above contains a recent conversation that mentions
+      specific files, root causes, or what needs to change — USE THAT DIRECTLY.
+      Do not rediscover what was already discussed. The conversation context
+      is authoritative — trust it over the metadata index.
+
+      If no conversation context is present OR it doesn't mention specific files:
       1. Read the "Project metadata" section in the system prompt
       2. Match the issue to relevant directories based on title/covers/specialist
       3. From the covers of relevant dirs, identify likely_files
       4. Read the "Related issues" section for lessons from past work
-      5. Identify what is explicitly OUT OF SCOPE
 
-      GATE CONDITION: your output must reference specific files from the
-      covers fields in the metadata section. Do not invent paths.
+      GATE CONDITION: output must reference specific files. If conversation context
+      named them, use those. Otherwise derive from metadata covers fields.
 
       Respond with a JSON code block:
       ```json
