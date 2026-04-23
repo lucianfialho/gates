@@ -36,3 +36,4 @@ indexed_directories:
     specialist: config
   - path: skills
     specialist: skills
+budget: 50
