@@ -112,9 +112,15 @@ export const runSkill = (
         console.error(`[gates] research context: ${researchCtx.summaries.length} summaries, ${researchCtx.related.length} related issues`)
       }
 
-      // Inject project context — filter to files identified by analyze if available
-      const analyzeFiles = (outputs["analyze"]?.output as Record<string, unknown>)?.files
-      const filterFiles = Array.isArray(analyzeFiles) ? analyzeFiles as string[] : undefined
+      // Inject project context — filter to confirmed files only (reduces tokens significantly)
+      const prpOutput = outputs["analyze"]?.output as Record<string, unknown> | undefined
+      // PRP schema: context.files. Legacy schema: files directly.
+      const prpFiles = (prpOutput?.["context"] as Record<string, unknown>)?.["files"]
+      const legacyFiles = prpOutput?.["files"]
+      // Before analyze: use research output's likely_files as filter
+      const researchFiles = (outputs["research"]?.output as Record<string, unknown>)?.["likely_files"]
+      const rawFiles = prpFiles ?? legacyFiles ?? researchFiles
+      const filterFiles = Array.isArray(rawFiles) ? rawFiles as string[] : undefined
       const contextSnippet = yield* Effect.promise(() => buildContextPrompt(filterFiles))
       const stateSystem = [systemContext, contextSnippet, researchInjection]
         .filter(Boolean)
