@@ -50,8 +50,8 @@ export const getProviderConfig = async (): Promise<{
 }
 
 const defaultModelFor = (provider: string): string => {
-  if (provider === "anthropic")  return "claude-sonnet-4-6"
-  if (provider === "openai")     return "gpt-4o-mini"
-  if (provider === "minimax")    return "minimax-m2.7"
+  if (provider === "anthropic" || provider.toLowerCase() === "anthropic")  return "claude-sonnet-4-6"
+  if (provider === "openai"     || provider.toLowerCase() === "openai")     return "gpt-4o-mini"
+  if (provider === "minimax"    || provider.toLowerCase() === "minimax")    return "minimax-m2.7"
   return "gpt-4o-mini"
 }
