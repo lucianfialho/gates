@@ -92,8 +92,11 @@ export const App = ({ runEffect, systemPrompt }: {
         .replace(/```[\w]*\n([\s\S]+?)```/g, (_, code: string) =>
           code.trim().split("\n").slice(0, 4).map((l: string) => `  ${l}`).join("\n") +
           (code.split("\n").length > 4 ? "\n  …" : ""))
-        .replace(/\*\*(.*?)\*\*/g, "$1")
-        .replace(/`([^`]+)`/g, "$1")
+        .replace(/^#{1,3} /gm, "")          // strip headings
+        .replace(/\*\*(.*?)\*\*/g, "$1")   // strip bold
+        .replace(/\*(.*?)\*/g, "$1")       // strip italic
+        .replace(/`([^`]+)`/g, "$1")       // strip inline code
+        .replace(/^[-*] /gm, "• ")
         .split("\n")
         .map((l: string) => l.length > cols ? l.slice(0, cols - 1) + "…" : l)
         .slice(0, maxLines)
