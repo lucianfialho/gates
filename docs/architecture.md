@@ -1,118 +1,112 @@
 # gates — Architecture
 
+## Onde estamos no diagrama de referência
+
 ```mermaid
 flowchart TB
-  classDef input    fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
-  classDef gateway  fill:#fef9c3,stroke:#ca8a04,color:#713f12
-  classDef gates    fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
-  classDef context  fill:#fce7f3,stroke:#db2777,color:#831843
-  classDef knowledge fill:#dcfce7,stroke:#16a34a,color:#14532d
-  classDef hooks    fill:#ffedd5,stroke:#ea580c,color:#7c2d12
-  classDef skill    fill:#f3e8ff,stroke:#9333ea,color:#3b0764
+  classDef done    fill:#dcfce7,stroke:#16a34a,color:#14532d
+  classDef partial fill:#fef9c3,stroke:#ca8a04,color:#713f12
+  classDef missing fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+  classDef hitl    fill:#fdf4ff,stroke:#a855f7,color:#581c87
 
-  %% ── INPUT ──────────────────────────────────────────────────
   subgraph INPUT["  Input  "]
-    UP["⊙ User Prompt"]
-    SC["⊙ gates chat / solve-issue N / write-tests path"]
+    UP["✅ User Prompt"]
+    SC["✅ /s /solve /test · #42"]
+    MD["❌ @read @patch @standard"]
   end
 
-  %% ── GATEWAY ─────────────────────────────────────────────────
   subgraph GATEWAY["  Gateway  "]
-    IEM{{"Intent Router\n(chat detects mode)"}}
-    QA["CHAT\nQ&A only"]
-    PATCH["PATCH\nDirect prompt → agent"]
-    STANDARD["STANDARD\nFull skill lifecycle"]
+    IEM{{"✅ classifyExplicit()\n(determinístico)"}}
+    QA["✅ CHAT\nfreeform agent"]
+    PATCH["🔶 PATCH\nfreeform ≈ patch"]
+    STANDARD["✅ STANDARD\nsolve-issue skill"]
   end
 
-  UP --> IEM
-  SC --> IEM
-  IEM -->|"question / explain"| QA
-  IEM -->|"quick fix"| PATCH
-  IEM -->|"solve-issue / write-tests"| STANDARD
+  UP & SC --> IEM
+  MD -.->|"não implementado"| IEM
+  IEM -->|"/s ou número"| STANDARD
+  IEM -->|"resto"| QA
 
-  %% ── GATES (Roles) ───────────────────────────────────────────
-  subgraph GATES["  Gates  "]
+  subgraph ROLES["  Roles / Gates  "]
     direction TB
-    BS["BashSafety Gate\nblocks force-push · rm -rf · bad npm scripts"]
-    MG["Metadata Gate\nblocks git commit without .metadata/summary.yaml"]
-    SV["Schema Validator\nblocks state transition without valid JSON output"]
+    AG["✅ Ambiguity Gatekeeper\nclarify state (agora determinístico)"]
+    BS["✅ Security Sentinel\nBashSafety gate (PreToolUse)"]
+    MG["✅ Documentation Curator\nMetadata gate (blocks git commit)"]
+    IS["❌ Interface Steward\nnot implemented"]
+    KA["❌ Knowledge Architect\nnot implemented"]
   end
 
-  %% ── CONTEXT ──────────────────────────────────────────────────
   subgraph CONTEXT["  Context  "]
     direction TB
-    CM["CLAUDE.md\nProject docs injected as system prompt"]
-    CY[".gates/context.yaml\nAuto-updated file tree + exports + git log"]
-    EL["Tool-result Elision\nStale reads → [file cached] after 3 turns"]
+    CY["✅ context.yaml\nfile tree + exports + git log"]
+    DET["✅ Direct Reading when scope clear\ndeterministic research (regex extract)"]
+    BC["🔶 Budget Control\ntoken tracking mas sem enforcement"]
+    KE["❌ Knowledge Escalation\nnot implemented"]
   end
 
-  %% ── KNOWLEDGE ────────────────────────────────────────────────
   subgraph KNOWLEDGE["  Knowledge  "]
     direction TB
-    META[".metadata/summary.yaml\nPer indexed directory — agent-maintained"]
-    SKILLDIR["skills/ index\nsolve-issue · write-tests · custom"]
-    RUNS[".gates/runs/*.jsonl\nAppend-only audit trail per run"]
+    META["✅ .metadata/summary.yaml\nper indexed directory"]
+    CFG["✅ .gates/config.yaml\nindexed_directories"]
+    KG["❌ KNOWLEDGE_GRAPH.md\nroot node — not implemented"]
+    DI["❌ Domain Index\nnot implemented"]
   end
 
-  %% ── HOOKS ────────────────────────────────────────────────────
   subgraph HOOKS["  Hooks  "]
     direction TB
-    PRE["pre_hook\nBashSafety intercepts Bash tool calls"]
-    GUARD["guard_hook\nMetadata gate intercepts git commit"]
-    POST["post_hook\nUpdate context.yaml after run"]
-    FAIL["fall_hook\non_error: retry · skip · abort"]
+    PRE["✅ pre_hook\nBashSafety intercepts tool calls"]
+    GUARD["✅ guard_hook\nMetadata gate on git commit"]
+    POST["✅ post_hook\ncontext.yaml update after run"]
+    FAIL["✅ fall_hook\non_error: retry·skip·abort·hitl"]
+    SCA["❌ Sca_hook / Knowledge Extraction\nnot implemented"]
   end
 
-  %% ── SKILL LIFECYCLE ──────────────────────────────────────────
-  subgraph LIFECYCLE["  Skill Lifecycle — solve-issue  "]
+  subgraph LIFECYCLE["  Lifecycle — solve-issue  "]
     direction LR
-    S1["analyze\n─────\ngate: confirmed\nfile paths in JSON"]
-    S2["branch\n─────\ngate: git branch\n--show-current ✓"]
-    S3["implement\n─────\ngate: typecheck\npassed: true"]
-    S4["verify\n─────\ngate: passed=true\nindependent check"]
-    S5["open_pr\n─────\ngate: PR URL\nin output"]
-    DONE(["done ✓"])
 
-    S1 --> S2 --> S3 --> S4
-    S4 -->|passed| S5 --> DONE
-    S4 -->|failed| S3
+    CLR["✅ clarify\n(determinístico se contexto rico)"]
+    RES["✅ research\n(determinístico se files no chat)"]
+    ANA["✅ analyze\nPRP — root_cause + changes + acceptance"]
+
+    HITL{{"🔴 HITL Gate\nEXISTE mas UX quebrado\nmostra JSON bruto\nhumano não consegue ler"}}
+
+    IMP["✅ implement\nImplement by Contract"]
+    VER["✅ verify\ntypecheck only (lightweight)"]
+    DONE(["✅ branch + PR\n(determinístico pelo Runner)"])
+
+    CLR --> RES --> ANA --> HITL
+    HITL -->|"Y — aprovado"| IMP
+    HITL -->|"N — aborta"| DONE
+    IMP --> VER --> DONE
   end
 
-  %% ── CONNECTIONS ──────────────────────────────────────────────
   STANDARD --> LIFECYCLE
-  GATES     -.->|enforces| LIFECYCLE
-  CONTEXT   -.->|injects into system prompt| LIFECYCLE
-  KNOWLEDGE -.->|indexes + audits| LIFECYCLE
-  HOOKS     -.->|intercepts| LIFECYCLE
+  ROLES -.->|enforces| LIFECYCLE
+  CONTEXT -.->|injects| LIFECYCLE
+  KNOWLEDGE -.->|indexes| LIFECYCLE
+  HOOKS -.->|intercepts| LIFECYCLE
 
-  %% ── STYLES ───────────────────────────────────────────────────
-  class UP,SC input
-  class IEM,QA,PATCH,STANDARD gateway
-  class BS,MG,SV gates
-  class CM,CY,EL context
-  class META,SKILLDIR,RUNS knowledge
-  class PRE,GUARD,POST,FAIL hooks
-  class S1,S2,S3,S4,S5,DONE skill
+  class UP,SC,IEM,QA,STANDARD,AG,BS,MG,CY,DET,META,CFG,PRE,GUARD,POST,FAIL,CLR,RES,ANA,IMP,VER,DONE done
+  class PATCH,BC,KG done
+  class MD,IS,KA,KE,DI,SCA missing
+  class HITL hitl
 ```
 
-## Layer mapping
+## Legenda
 
-| Image | gates |
+| Status | Significa |
 |---|---|
-| Input → User Prompt | `gates chat` / `gates solve-issue "N"` |
-| Gateway → Intent Mode | Chat router detects Q&A vs skill |
-| PATCH mode | Direct `gates "quick fix"` prompt |
-| STANDARD mode | `solve-issue` skill: analyze→branch→implement→verify→PR |
-| Roles → Security Sentinel | `BashSafety` gate (PreToolUse) |
-| Roles → Documentation Curator | `Metadata` gate (blocks commit without .metadata) |
-| Roles → Ambiguity Gatekeeper | `schema_validate` — blocks state without valid JSON |
-| Context → Knowledge | `.gates/context.yaml` — auto file tree + exports |
-| Context → Budget Control | Tool-result elision (stale reads → [cached]) |
-| Knowledge → Domain Index | `.metadata/summary.yaml` per indexed directory |
-| Knowledge → Skill Index | `skills/` YAML state machines |
-| Hooks → pre_hook | BashSafety intercepts Bash calls |
-| Hooks → guard_hook | Metadata gate intercepts git commit |
-| Hooks → fall_hook | `on_error: retry\|skip\|abort` in skill.yaml |
-| Lifecycle → Approval Gate | Schema gate blocks state transition without evidence |
-| Lifecycle → Implement by Contract | `implement` state: typecheck must exit 0 |
-| Lifecycle → Audit | `.gates/runs/*.jsonl` JSONL per run |
+| ✅ Verde | Implementado e funcionando |
+| 🔶 Amarelo | Parcialmente implementado |
+| ❌ Vermelho | Não implementado |
+| 🔴 Roxo | Implementado mas com bug crítico de UX |
+
+## Gap mais crítico agora
+
+O **HITL Gate** é o único ponto vermelho num sistema que deveria ser o centro do controle humano. O humano aprova um JSON ilegível em vez de um plano claro. Isso é o que torna o "Approval Gate" inútil na prática.
+
+## O que implementar a seguir
+
+1. **HITL legível** — mostrar o PRP formatado (issue, summary, files, changes, acceptance)
+2. **Mode selection** — `@read`, `@patch`, `@standard` como shortcuts (hoje só `/s`)
+3. **Knowledge Architect** — navegação pelo knowledge graph via .metadata
