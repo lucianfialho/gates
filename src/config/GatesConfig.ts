@@ -12,6 +12,7 @@ export interface GatesConfig {
   provider?: string         // active provider name, e.g. "anthropic", "minimax"
   model?: string            // model name, e.g. "claude-sonnet-4-6", "minimax-m2.7"
   providers?: Record<string, ProviderConfig>
+  context_scope?: "full" | "analyze_only"
 }
 
 let _cache: GatesConfig | null = null

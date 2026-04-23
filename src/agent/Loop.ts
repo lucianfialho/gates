@@ -73,8 +73,50 @@ const executeToolCalls = (
     return yield* Effect.forEach(
       calls,
       (call: ToolCall) =>
-        gates.enforce(call).pipe(
+        Effect.gen(function* () {
+          // Enforce gates and measure duration
+          const gateStart = performance.now()
+          yield* gates.enforce(call)
+          const gateDuration = Math.round(performance.now() - gateStart)
+
+          // Record gate_pass before tool execution
+          yield* persistence.record(runId, {
+            type: "gate_pass",
+            gate: "enforced",
+            tool: call.name,
+            ts: now(),
+            duration: gateDuration,
+          })
+
+          // Execute the tool and measure duration
+          const toolStart = performance.now()
+          yield* persistence.record(runId, {
+            type: "tool_call",
+            tool: call.name,
+            tool_use_id: call.id,
+            ts: now(),
+          })
+
+          const result = yield* tools.execute(call.id, call.name, call.input).pipe(
+            Effect.catchTag("ToolError", (e: ToolError) =>
+              Effect.succeed({ id: call.id, content: `Error: ${e.cause instanceof Error ? e.cause.message : String(e.cause)}` })
+            )
+          )
+
+          const toolDuration = Math.round(performance.now() - toolStart)
+
+          // Record tool_result event
+          yield* persistence.record(runId, {
+            type: "tool_result",
+            results: [result],
+            ts: now(),
+            duration: toolDuration,
+          })
+
+          return result
+        }).pipe(
           Effect.catchTag("GateError", (e) => {
+            const blockStart = performance.now()
             onEvent?.({ type: "gate_block", gate: e.gate, reason: e.reason })
             return persistence
               .record(runId, {
@@ -83,16 +125,10 @@ const executeToolCalls = (
                 reason: e.reason,
                 call,
                 ts: now(),
+                duration: Math.round(performance.now() - blockStart),
               })
               .pipe(Effect.andThen(Effect.fail(e)))
           }),
-          Effect.andThen(
-            tools.execute(call.id, call.name, call.input).pipe(
-              Effect.catchTag("ToolError", (e: ToolError) =>
-                Effect.succeed({ id: call.id, content: `Error: ${e.cause instanceof Error ? e.cause.message : String(e.cause)}` })
-              )
-            )
-          )
         ),
       { concurrency: 1 }
     )
@@ -157,12 +193,15 @@ export const run = (
             output_tokens: u.output_tokens + response.usage.output_tokens,
           }))
 
+          // Measure llm_response duration
+          const reqDuration = Math.round(performance.now() - reqStart)
           yield* persistence.record(runId, {
             type: "llm_response",
             stop_reason: response.stop_reason,
             tool_calls: response.tool_calls,
             usage: response.usage,
             ts: now(),
+            duration: reqDuration,
           })
 
           const withAssistant: Message[] = [

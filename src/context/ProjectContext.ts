@@ -7,7 +7,8 @@ import { dump, load } from "js-yaml"
 
 const execFileAsync = promisify(execFile)
 
-const CONTEXT_FILE = join(process.cwd(), ".gates", "context.yaml")
+const CONTEXT_FILE    = join(process.cwd(), ".gates", "context.yaml")
+const RELEVANT_FILE   = join(process.cwd(), ".gates", "relevant.json")
 const MAX_FILES = 80
 const EXPORT_RE = /export\s+(?:default\s+)?(?:async\s+)?(?:class|function|const|let|interface|type|enum)\s+(\w+)/g
 
@@ -16,10 +17,12 @@ interface FileEntry {
   exports: string[]
 }
 
-interface ProjectContext {
+export interface ProjectContext {
   updated_at: string
   files: Record<string, FileEntry>
   recent_changes: string[]
+  relevantPaths: string[]
+  phase: "analyze" | "implement" | "verify"
 }
 
 const extractExports = (src: string): string[] => {
@@ -50,7 +53,13 @@ export const scanProject = async (): Promise<ProjectContext> => {
     recent_changes = stdout.trim().split("\n").filter(Boolean)
   } catch { /* not a git repo */ }
 
-  return { updated_at: new Date().toISOString(), files, recent_changes }
+  let relevantPaths: string[] = []
+  try {
+    const raw = await readFile(RELEVANT_FILE, "utf-8")
+    relevantPaths = JSON.parse(raw) as string[]
+  } catch { /* file not found or unparseable */ }
+
+  return { updated_at: new Date().toISOString(), files, recent_changes, relevantPaths, phase: "analyze" }
 }
 
 export const updateContextFile = async (): Promise<void> => {

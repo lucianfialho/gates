@@ -1,6 +1,7 @@
 import { Effect } from "effect"
-import { readFile } from "node:fs/promises"
-import { existsSync } from "node:fs"
+import { readFileSync, existsSync } from "node:fs"
+import { join } from "node:path"
+
 import { GateError, type Gate, type ToolCall } from "./Gate.js"
 
 const block = (gate: string, reason: string) =>
@@ -24,30 +25,27 @@ const checkForcePush = (cmd: string): Effect.Effect<void, GateError> => {
 
 // --- npm run <script> must exist in package.json ---
 
-const loadPackageScripts = (): Effect.Effect<string[]> =>
-  Effect.tryPromise({
-    try: async () => {
-      const raw = await readFile("package.json", "utf-8")
-      const pkg = JSON.parse(raw) as { scripts?: Record<string, string> }
-      return Object.keys(pkg.scripts ?? {})
-    },
-    catch: () => [],
-  }).pipe(Effect.orElseSucceed(() => [] as string[]))
+const loadPackageScripts = (): string[] => {
+  try {
+    const raw = readFileSync(join(process.cwd(), "package.json"), "utf-8")
+    const pkg = JSON.parse(raw) as { scripts?: Record<string, string> }
+    return Object.keys(pkg.scripts ?? {})
+  } catch {
+    return []
+  }
+}
 
 const checkNpmScript = (cmd: string): Effect.Effect<void, GateError> => {
   const match = /npm\s+run\s+(\S+)/.exec(cmd)
   if (!match) return pass
   const script = match[1]!
 
-  return loadPackageScripts().pipe(
-    Effect.flatMap((scripts) => {
-      if (scripts.length === 0) return pass
-      if (scripts.includes(script)) return pass
-      return block(
-        "bash-safety/npm-script",
-        `Script "${script}" not found in package.json. Available: ${scripts.join(", ")}`
-      )
-    })
+  const scripts = loadPackageScripts()
+  if (scripts.length === 0) return pass          // no scripts in package.json
+  if (scripts.includes(script)) return pass     // script is whitelisted
+  return block(
+    "bash-safety/npm-script",
+    `Script "${script}" not found in package.json. Available: ${scripts.join(", ")}`
   )
 }
 
