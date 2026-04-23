@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from "react"
-import { useKeyboard, useRenderer } from "@opentui/react"
+import { useKeyboard, useRenderer, useOnResize } from "@opentui/react"
 import { Effect } from "effect"
 import { join } from "node:path"
 import { run, type ChatEvent } from "../agent/Loop.js"
@@ -71,9 +71,9 @@ const cwd = process.cwd()
 const shortPath = (p: unknown) =>
   String(p ?? "").replace(cwd + "/", "").replace(cwd, "").slice(0, 45)
 
-const toolSummary = (name: string, input: unknown): string => {
+const toolSummary = (name: string, input: unknown, termCols = 80): string => {
   const inp = input as Record<string, unknown>
-  const cols = (process.stdout.columns ?? 80) - 20
+  const cols = termCols - 20
   const hint =
     name === "read"       ? shortPath(inp.path) :
     name === "read_lines" ? `${shortPath(inp.path)}:${inp.start}-${inp.end}` :
@@ -106,6 +106,12 @@ export const App = ({ runEffect, systemPrompt }: {
   systemPrompt?: string
 }) => {
   const renderer = useRenderer()
+  const [termSize, setTermSize] = useState({
+    cols: process.stdout.columns ?? 80,
+    rows: process.stdout.rows ?? 24,
+  })
+  useOnResize((w, h) => setTermSize({ cols: w, rows: h }))
+
   const [input, setInput]   = useState("")
   const [msgs, setMsgs]     = useState<Msg[]>([])
   const [liveLines, setLiveLines] = useState<Array<{ icon: string; text: string; dim: boolean }>>([])
@@ -166,7 +172,7 @@ export const App = ({ runEffect, systemPrompt }: {
       text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
 
     const sanitizeForTUI = (text: string, maxLines = 12): string => {
-      const cols = (process.stdout.columns ?? 80) - 8
+      const cols = (termSize.cols) - 8
       return stripThinking(text)
         .replace(/```[\w]*\n([\s\S]+?)```/g, (_, code: string) =>
           code.trim().split("\n").slice(0, 4).map((l: string) => `  ${l}`).join("\n") +
@@ -203,7 +209,7 @@ export const App = ({ runEffect, systemPrompt }: {
         if (cleaned) addLive("…", cleaned, true)
       }
       if (ev.type === "tool_call") {
-        const s = toolSummary(ev.name, ev.input)
+        const s = toolSummary(ev.name, ev.input, termSize.cols)
         tools.push({ text: s, isGate: false })
         addLive("⚙", s)
       }
@@ -309,8 +315,8 @@ export const App = ({ runEffect, systemPrompt }: {
     return `${(totalIn / 1000).toFixed(0)}k in · ${(totalOut / 1000).toFixed(0)}k out · ${cost.toFixed(2)} · ${elapsedStr}`
   })()
 
-  const rows = process.stdout.rows ?? 24
-  const cols = process.stdout.columns ?? 80
+  const rows = termSize.rows
+  const cols = termSize.cols
   const HEADER_H = 3   // 1 padding + 1 text + 1 border
   const INPUT_H = 3    // 1 border top + 1 text + 1 border bottom
   const STATS_H = statsBar ? 1 : 0
@@ -344,7 +350,7 @@ export const App = ({ runEffect, systemPrompt }: {
                 ))}
                 <box flexDirection="row" gap={1}>
                   <text fg={msg.error ? "#FF4444" : "#44AA44"}>{msg.error ? "✗" : "●"}</text>
-                  <text width={process.stdout.columns - 6}>{msg.text}</text>
+                  <text width={termSize.cols - 6}>{msg.text}</text>
                 </box>
                 {msg.usage && (
                   <text fg="#444444">{"    "}{msg.usage.input_tokens} in / {msg.usage.output_tokens} out</text>
@@ -389,9 +395,9 @@ export const App = ({ runEffect, systemPrompt }: {
           <text><b fg={hitl.isError ? "#FF4444" : "#AA44FF"}>
             {hitl.isError ? "🚨  Error — state: " : "✋  Approval required — state: "}{hitl.state}
           </b></text>
-          <text fg="#333333">{"─".repeat((process.stdout.columns ?? 80) - 8)}</text>
+          <text fg="#333333">{"─".repeat((termSize.cols) - 8)}</text>
           <text>{JSON.stringify(hitl.output, null, 2)}</text>
-          <text fg="#333333">{"─".repeat((process.stdout.columns ?? 80) - 8)}</text>
+          <text fg="#333333">{"─".repeat((termSize.cols) - 8)}</text>
           <box flexDirection="row" gap={3} marginTop={1}>
             <text><b fg="#44AA44">[Y] {hitl.isError ? "Retry" : "Proceed"}</b></text>
             <text><b fg="#FF4444">[N] {hitl.isError ? "Skip state" : "Abort"}</b></text>
