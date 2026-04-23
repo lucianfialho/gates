@@ -23,7 +23,7 @@ const classifyIntent = (text: string): Intent => {
 }
 
 const resolveSkillPath = (skillName: string): string =>
-  join(__dirname, "..", "..", "skills", skillName, "skill.yaml")
+  join(process.cwd(), "skills", skillName, "skill.yaml")
 
 const toolSummary = (name: string, input: unknown): string => {
   const inp = input as Record<string, unknown>
