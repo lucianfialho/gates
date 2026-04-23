@@ -67,6 +67,15 @@ const labelFor = (level: LogLevel): string => {
 }
 
 const makeImpl = (): LoggerShape => {
+  const truncateWithMeta = (str: string): { truncated: string; wasTruncated: boolean; originalLength?: number } => {
+    if (str.length <= TRUNCATE_LENGTH) return { truncated: str, wasTruncated: false }
+    return {
+      truncated: str.slice(0, TRUNCATE_LENGTH - TRUNCATE_SUFFIX.length) + TRUNCATE_SUFFIX,
+      wasTruncated: true,
+      originalLength: str.length,
+    }
+  }
+
   const log = (
     level: LogLevel,
     message: string,
@@ -75,6 +84,7 @@ const makeImpl = (): LoggerShape => {
     const timestamp = new Date().toISOString()
     const c = colorFor(level)
     const label = labelFor(level)
+    const { truncated: msg, wasTruncated, originalLength } = truncateWithMeta(message)
 
     const parts: string[] = []
     parts.push(`${colors.dim}${timestamp}${colors.reset}`)
@@ -87,8 +97,10 @@ const makeImpl = (): LoggerShape => {
     if (tool) parts.push(`${colors.magenta}${tool}${colors.reset}`)
     if (duration_ms !== undefined) parts.push(`${colors.dim}(${duration_ms}ms)${colors.reset}`)
 
-    const msg = truncate(message)
     parts.push(msg)
+    if (wasTruncated) {
+      parts.push(`${colors.dim}(truncated from ${originalLength} chars)${colors.reset}`)
+    }
 
     console.error(parts.join(" "))
 
@@ -96,14 +108,14 @@ const makeImpl = (): LoggerShape => {
     if (!process.stdout.isTTY) {
       const structured: Record<string, unknown> = {
         timestamp,
-        event: level,
-        gate: gate,
-        tool: tool,
-        duration_ms: duration_ms,
+        event: label.toLowerCase(),
+        gate: gate ?? null,
+        tool: tool ?? null,
+        duration_ms: duration_ms ?? null,
         message: msg,
       }
-      if (message.length > TRUNCATE_LENGTH) {
-        structured._originalLength = message.length
+      if (wasTruncated) {
+        structured._originalLength = originalLength
       }
       console.error(JSON.stringify(structured))
     }
@@ -115,7 +127,7 @@ const makeImpl = (): LoggerShape => {
     pass: (gate, tool, duration_ms) =>
       log("pass", `${gate} → ${tool} allowed`, { gate, tool, duration_ms }),
     block: (gate, tool, reason, duration_ms) =>
-      log("block", truncate(reason), { gate, tool, duration_ms }),
+      log("block", reason, { gate, tool, duration_ms }),
     warn: (message, meta) => log("warn", message, meta),
     error: (message, meta) => log("error", message, meta),
   }
