@@ -327,32 +327,43 @@ const main = async () => {
   const prompt = cmd ? [cmd, ...rest].join(" ") : ""
   if (!prompt || cmd === "--help" || cmd === "help") {
     const skillsDir = join(__dirname, "..", "skills")
-    const skills = await readdir(skillsDir).catch(() => [] as string[])
-    const skillList = skills.map(s => `  gates ${s} "<issue description>"`).join("\n")
+    const allEntries = await readdir(skillsDir).catch(() => [] as string[])
+    // Only show directories that have a skill.yaml and don't start with dot
+    const skills = allEntries.filter(s => !s.startsWith("."))
+    const skillList = skills.map(s => `  gates ${s} "<description>"`).join("\n")
     console.log(`
 gates — autonomous coding agent
 
 USAGE
   gates [--verbose] <prompt>                        run the agent with a direct prompt
-  gates [--verbose] <skill> "<description>"         run a skill (shortcut)
+  gates [--verbose] <skill> "<description>"         run a skill
   gates [--verbose] run <skill.yaml> [key=value .]  run a skill by path
-  gates stats                                       show token usage and cost per run
+  gates chat                                        interactive TUI (like Claude Code)
+  gates simulate <skill.yaml> [key=value .]         trace skill flow without LLM calls
+  gates stats                                       token usage and cost per run
   gates logs                                        list last 10 runs
-  gates logs <runId>                                show timeline for a specific run
-  gates auth set <key>                              save Anthropic API key
+  gates logs <runId>                                full event timeline for a run
+  gates auth set <key>                              save API key (Anthropic or OpenAI)
   gates auth show                                   show stored key (masked)
   gates auth remove                                 delete stored key
   gates help                                        show this message
 
 FLAGS
-  --verbose   log each tool call, tool result, and state transition to stderr
+  --verbose              log tool calls, results, state transitions
+  GATES_PROVIDER=openai  use OpenAI instead of Anthropic
+  GATES_MODEL=...        override model name
+  GATES_BASE_URL=...     override base URL (for Ollama etc.)
 
 SKILLS${skillList ? "\n" + skillList : "  (none installed)"}
 
 EXAMPLES
   gates "list all TypeScript files in src/"
   gates solve-issue "add a --verbose flag to the CLI"
-  gates run skills/solve-issue/skill.yaml issue="fix the grep tool timeout"
+  gates solve-issue 42                              ← GitHub issue number
+  gates write-tests "src/machine/Runner.ts"
+  gates simulate skills/solve-issue/skill.yaml      ← free, no LLM
+  gates chat
+  GATES_PROVIDER=openai OPENAI_API_KEY=sk-... gates solve-issue 42
   gates stats
     `.trim())
     process.exit(prompt ? 0 : 1)
