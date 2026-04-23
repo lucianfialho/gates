@@ -47,7 +47,7 @@ const extractJSON = (text: string): unknown | null => {
   return null
 }
 
-export type HITLCallback = (state: string, output: unknown) => Promise<boolean>
+export type HITLCallback = (state: string, output: unknown, isError?: boolean) => Promise<boolean>
 
 export const runSkill = (
   skillPath: string,
@@ -139,6 +139,19 @@ export const runSkill = (
             console.error(`[gates] ✗ ${e.reason} — transitioning to error state: ${stateDef.on_error_state}`)
             return persistence.record(runId, { type: "state_error", state: currentState, policy: "error_state", retryCount, error: e.reason, ts: new Date().toISOString() }).pipe(
               Effect.map((): AgentOutcome => ({ ok: false, action: "skip", error: e }))
+            )
+          }
+
+          if (policy === "hitl" && onHITL) {
+            return persistence.record(runId, { type: "state_error", state: currentState, policy: "hitl", retryCount, error: e.reason, ts: new Date().toISOString() }).pipe(
+              Effect.andThen(() =>
+                Effect.promise(() => onHITL(currentState, { error: e.reason, retryCount }, true))
+              ),
+              Effect.map((approved): AgentOutcome =>
+                approved
+                  ? { ok: false, action: "retry", error: e }   // true → retry
+                  : { ok: false, action: "skip", error: e }    // false → skip to next state
+              )
             )
           }
 

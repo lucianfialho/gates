@@ -52,7 +52,7 @@ export const App = ({ runEffect, systemPrompt }: {
   const [msgs, setMsgs]     = useState<Msg[]>([])
   const [liveText, setLive] = useState("")
   const [status, setStatus] = useState<"idle" | "thinking" | "hitl">("idle")
-  const [hitl, setHitl]     = useState<{ state: string; output: unknown; resolve: (v: boolean) => void } | null>(null)
+  const [hitl, setHitl]     = useState<{ state: string; output: unknown; isError: boolean; resolve: (v: boolean) => void } | null>(null)
   const idRef               = useRef(0)
 
   useKeyboard((key) => {
@@ -68,8 +68,8 @@ export const App = ({ runEffect, systemPrompt }: {
     if (key.name === "escape" || (key.ctrl && key.name === "c")) renderer.destroy()
   })
 
-  const chatHITL = useCallback((state: string, output: unknown): Promise<boolean> =>
-    new Promise(resolve => { setStatus("hitl"); setHitl({ state, output, resolve }) }), [])
+  const chatHITL = useCallback((state: string, output: unknown, isError = false): Promise<boolean> =>
+    new Promise(resolve => { setStatus("hitl"); setHitl({ state, output, isError, resolve }) }), [])
 
   const handleSubmit = useCallback(async (value: string) => {
     if (!value.trim() || status !== "idle") return
@@ -87,6 +87,10 @@ export const App = ({ runEffect, systemPrompt }: {
       text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
 
     const onEvent = (ev: ChatEvent) => {
+      if (ev.type === "thinking") {
+        // Show first 80 chars of intermediate reasoning
+        setLive(ev.text.slice(0, 80).replace(/\n/g, " "))
+      }
       if (ev.type === "tool_call") {
         const s = toolSummary(ev.name, ev.input)
         tools.push({ text: s, isGate: false })
@@ -187,25 +191,27 @@ export const App = ({ runEffect, systemPrompt }: {
         )}
       </scrollbox>
 
-      {/* HITL approval overlay */}
+      {/* HITL overlay — plan approval or error escalation */}
       {status === "hitl" && hitl && (
         <box
           flexDirection="column"
           border
           borderStyle="rounded"
-          borderColor="#AA44FF"
+          borderColor={hitl.isError ? "#FF4444" : "#AA44FF"}
           paddingX={2}
           paddingY={1}
           marginX={2}
           marginBottom={1}
         >
-          <text><b fg="#AA44FF">✋  Approval required — state: {hitl.state}</b></text>
+          <text><b fg={hitl.isError ? "#FF4444" : "#AA44FF"}>
+            {hitl.isError ? "🚨  Error — state: " : "✋  Approval required — state: "}{hitl.state}
+          </b></text>
           <text fg="#333333">{"─".repeat((process.stdout.columns ?? 80) - 8)}</text>
           <text>{JSON.stringify(hitl.output, null, 2)}</text>
           <text fg="#333333">{"─".repeat((process.stdout.columns ?? 80) - 8)}</text>
           <box flexDirection="row" gap={3} marginTop={1}>
-            <text><b fg="#44AA44">[Y] Proceed</b></text>
-            <text><b fg="#FF4444">[N] Abort</b></text>
+            <text><b fg="#44AA44">[Y] {hitl.isError ? "Retry" : "Proceed"}</b></text>
+            <text><b fg="#FF4444">[N] {hitl.isError ? "Skip state" : "Abort"}</b></text>
           </box>
         </box>
       )}

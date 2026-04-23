@@ -5,10 +5,10 @@ import { resolve, join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createInterface } from "node:readline/promises"
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
 import { LLMLayer } from "./services/LLM.js"
-import { GateRegistryLayer } from "./services/GateRegistry.js"
+import { GateRegistry, makeGateRegistry } from "./services/GateRegistry.js"
 import { ToolRegistryLayer } from "./services/Tools.js"
+import { Logger, LoggerLayer } from "./services/Logger.js"
 import { BuiltinGatesLayer } from "./gates/builtin.js"
 import { PersistenceLayer } from "./machine/Persistence.js"
 import { Auth, AuthLayer } from "./auth/Auth.js"
@@ -23,12 +23,19 @@ const verbose = rawArgs.includes("--verbose")
 const filteredArgs = rawArgs.filter((a) => a !== "--verbose")
 const [cmd, ...rest] = filteredArgs
 
+// AppLayer wires Logger → GateRegistry → BuiltinGates (registers gates)
 const AppLayer = Layer.mergeAll(
+  LoggerLayer,
   LLMLayer,
-  GateRegistryLayer,
+  Layer.effect(GateRegistry)(
+    Effect.gen(function* () {
+      const logger = yield* Logger
+      return makeGateRegistry(logger)
+    })
+  ),
   ToolRegistryLayer,
   PersistenceLayer,
-  BuiltinGatesLayer.pipe(Layer.provide(GateRegistryLayer))
+  BuiltinGatesLayer
 )
 
 const loadContext = async (): Promise<string | undefined> => {
@@ -306,7 +313,7 @@ const main = async () => {
       ),
       Effect.provide(AppLayer)
     )
-    await Effect.runPromise(effect)
+    await Effect.runPromise(effect as any)
     return
   }
 
@@ -336,7 +343,7 @@ const main = async () => {
       ),
       Effect.provide(AppLayer)
     )
-    await Effect.runPromise(effect)
+    await Effect.runPromise(effect as any)
     return
   }
 
@@ -385,7 +392,7 @@ EXAMPLES
     process.exit(prompt ? 0 : 1)
   }
 
-  await Effect.runPromise(await runAgent(prompt, verbose))
+  await Effect.runPromise(await (runAgent(prompt, verbose) as any))
 }
 
 main().catch((e) => {

@@ -107,6 +107,7 @@ export type ChatEvent =
   | { type: "tool_call"; name: string; input: unknown }
   | { type: "tool_result"; id: string; content: string }
   | { type: "gate_block"; gate: string; reason: string }
+  | { type: "thinking"; text: string }   // intermediate agent text between tool calls
   | { type: "text"; text: string }
   | { type: "done"; usage: { input_tokens: number; output_tokens: number } }
 
@@ -195,6 +196,13 @@ export const run = (
             for (const call of response.tool_calls) {
               console.error(`[gates] tool call: ${call.name} ${JSON.stringify(call.input)}`)
             }
+          }
+
+          // Emit intermediate text (agent reasoning before tool calls)
+          const thinkingBlock = response.content.find((b) => b.type === "text")
+          if (thinkingBlock?.type === "text" && thinkingBlock.text.trim()) {
+            const cleaned = thinkingBlock.text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
+            if (cleaned) onEvent?.({ type: "thinking", text: cleaned })
           }
 
           for (const call of response.tool_calls) {

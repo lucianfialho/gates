@@ -166,8 +166,7 @@ states:
       }
       ```
     output_schema: schemas/implement.output.schema.json
-    on_error: retry
-    max_retries: 2
+    on_error: hitl
     transitions:
       - to: verify
 

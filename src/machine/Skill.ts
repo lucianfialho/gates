@@ -18,7 +18,7 @@ export interface StateDef {
   output_schema?: string  // path to JSON Schema file (relative to skill dir)
   terminal?: boolean
   transitions?: Transition[]
-  on_error?: "retry" | "skip" | "abort"  // default: abort
+  on_error?: "retry" | "skip" | "abort" | "hitl"  // hitl: pause and ask human
   on_error_state?: string  // transition to this state instead of crashing (must be terminal or handled)
   max_retries?: number  // used when on_error = retry, default 2
   hitl_pause?: boolean  // pause after this state and require human approval before continuing
