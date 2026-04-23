@@ -82,6 +82,10 @@ export const App = ({ runEffect, systemPrompt }: {
 
     const tools: Array<{ text: string; isGate: boolean }> = []
 
+    // Strip <think>...</think> blocks from MiniMax reasoning output
+    const stripThinking = (text: string) =>
+      text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
+
     const onEvent = (ev: ChatEvent) => {
       if (ev.type === "tool_call") {
         const s = toolSummary(ev.name, ev.input)
@@ -102,7 +106,7 @@ export const App = ({ runEffect, systemPrompt }: {
       setMsgs(prev => [...prev, {
         id: String(++idRef.current),
         role: "assistant",
-        text: result.text || "(no response)",
+        text: stripThinking(result.text) || "(no response)",
         tools: [...tools],
         usage: result.usage,
       }])
@@ -164,7 +168,7 @@ export const App = ({ runEffect, systemPrompt }: {
                 ))}
                 <box flexDirection="row" gap={1}>
                   <text fg={msg.error ? "#FF4444" : "#44AA44"}>{msg.error ? "✗" : "●"}</text>
-                  <text>{msg.text}</text>
+                  <text width={process.stdout.columns - 6}>{msg.text}</text>
                 </box>
                 {msg.usage && (
                   <text fg="#444444">{"    "}{msg.usage.input_tokens} in / {msg.usage.output_tokens} out</text>
@@ -222,9 +226,9 @@ export const App = ({ runEffect, systemPrompt }: {
           onInput={setInput}
           focused={status === "idle"}
           placeholder={
-            status === "hitl"     ? "press Y or N" :
-            status === "thinking" ? "" :
-            "#42  ·  solve-issue …  ·  write-tests …  ·  or ask anything"
+            status === "hitl"     ? "Y or N" :
+            status === "thinking" ? "..." :
+            "ask anything, solve-issue 42, write-tests path"
           }
         />
       </box>
