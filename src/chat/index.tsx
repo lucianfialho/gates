@@ -1,20 +1,25 @@
 import React from "react"
-import { render } from "ink"
-import { Effect, Layer } from "effect"
+import { createCliRenderer } from "@opentui/core"
+import { createRoot } from "@opentui/react"
+import { Effect } from "effect"
 import { App } from "./App.js"
 
 type RunFn = <A, E>(effect: Effect.Effect<A, E, never>) => Promise<A>
 
-export const startChat = async (appLayer: Layer.Layer<never>, systemPrompt?: string) => {
+export const startChat = async (_appLayer: unknown, systemPrompt?: string) => {
+  const renderer = await createCliRenderer({ exitOnCtrlC: true })
+  const root = createRoot(renderer)
   const runEffect: RunFn = (effect) => Effect.runPromise(effect)
 
-  const { waitUntilExit } = render(
+  root.render(
     <App
       runEffect={runEffect as never}
       {...(systemPrompt ? { systemPrompt } : {})}
-    />,
-    { exitOnCtrlC: true }
+    />
   )
 
-  await waitUntilExit()
+  // Wait until the renderer is destroyed (ESC or Ctrl+C)
+  await new Promise<void>(resolve => {
+    renderer.on("destroy", resolve)
+  })
 }
