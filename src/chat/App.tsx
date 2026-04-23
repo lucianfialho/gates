@@ -279,20 +279,18 @@ export const App = ({ runEffect, systemPrompt }: {
     const stripThinking = (text: string) =>
       text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
 
-    const sanitizeForTUI = (text: string, maxLines = Math.max(30, termSize.rows - 8)): string => {
+    const sanitizeForTUI = (text: string): string => {
       const cols = (termSize.cols) - 8
       return stripThinking(text)
         .replace(/```[\w]*\n([\s\S]+?)```/g, (_, code: string) =>
-          code.trim().split("\n").slice(0, 4).map((l: string) => `  ${l}`).join("\n") +
-          (code.split("\n").length > 4 ? "\n  …" : ""))
-        .replace(/^#{1,3} /gm, "")          // strip headings
-        .replace(/\*\*(.*?)\*\*/g, "$1")   // strip bold
-        .replace(/\*(.*?)\*/g, "$1")       // strip italic
-        .replace(/`([^`]+)`/g, "$1")       // strip inline code
+          code.trim().split("\n").map((l: string) => `  ${l}`).join("\n"))
+        .replace(/^#{1,3} /gm, "")
+        .replace(/\*\*(.*?)\*\*/g, "$1")
+        .replace(/\*(.*?)\*/g, "$1")
+        .replace(/`([^`]+)`/g, "$1")
         .replace(/^[-*] /gm, "• ")
         .split("\n")
         .map((l: string) => l.length > cols ? l.slice(0, cols - 1) + "…" : l)
-        .slice(0, maxLines)
         .join("\n")
         .trim()
     }
