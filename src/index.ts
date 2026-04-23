@@ -228,11 +228,22 @@ const main = async () => {
     return
   }
 
-  // skill shortcuts: gates <skill-name> "issue description" [key=value ...]
+  // skill shortcuts: gates <skill-name> "value" [key=value ...]
   const skillShortcut = join(__dirname, "..", "skills", cmd ?? "", "skill.yaml")
   if (cmd && (await access(skillShortcut).then(() => true).catch(() => false))) {
-    const issue = rest[0] ?? ""
-    const kvArgs = issue.includes("=") ? rest : [`issue=${issue}`, ...rest.slice(1)]
+    const firstArg = rest[0] ?? ""
+    // If the first arg is already key=value, pass through. Otherwise detect the
+    // first required input name from the skill YAML and use it as the key.
+    let kvArgs: string[]
+    if (firstArg.includes("=")) {
+      kvArgs = rest
+    } else {
+      const { load: yamlLoad } = await import("js-yaml")
+      const skillRaw = await readFile(skillShortcut, "utf-8").catch(() => "")
+      const skillDef = yamlLoad(skillRaw) as { inputs?: { required?: Array<{ name: string }> } }
+      const firstKey = skillDef?.inputs?.required?.[0]?.name ?? "issue"
+      kvArgs = [`${firstKey}=${firstArg}`, ...rest.slice(1)]
+    }
     const jsonMode = kvArgs.includes("--json")
     const filteredKvArgs = kvArgs.filter(a => a !== "--json")
     const inputs = parseKvArgs(filteredKvArgs)
