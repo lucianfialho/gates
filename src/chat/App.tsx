@@ -154,12 +154,9 @@ export const App = ({ runEffect, systemPrompt }: {
   const handleSubmit = useCallback(async (value: string) => {
     if (!value.trim() || status !== "idle") return
 
-    // Try explicit classification first (zero cost), fall back to LLM for ambiguous
-    const explicit = classifyExplicit(value.trim())
-    const intent = explicit ?? (
-      // Ambiguous: use LLM to classify (any language, ~200 tokens)
-      await classifyWithLLM(value.trim(), runEffect)
-    )
+    // Explicit commands only — ambiguous text is always freeform
+    // Use /s, /solve, issue number, or "solve-issue ..." to trigger skill
+    const intent = classifyExplicit(value.trim()) ?? { type: "freeform" as const, arg: value.trim() }
     setMsgs(prev => [...prev, { id: String(++idRef.current), role: "user", text: value.trim(), tools: [] }])
     setStatus("thinking")
     setLiveLines([{ icon: "⟳", text: "thinking…", dim: true }])
@@ -406,10 +403,10 @@ export const App = ({ runEffect, systemPrompt }: {
       )}
 
       {/* status bar — token usage + elapsed time + provider:model */}
-      {statsBar && (
+      {(statsBar || modelInfo) && (
         <box flexDirection="row" paddingX={2} height={1}>
           <box flexGrow={1} />
-          <text fg="#444444">{statsBar}</text>
+          {statsBar && <text fg="#444444">{statsBar}</text>}
           {modelInfo && <><text fg="#444444"> · </text><text fg="#555555">{modelInfo}</text></>}
         </box>
       )}
