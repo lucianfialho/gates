@@ -134,7 +134,7 @@ export const App = ({ runEffect, systemPrompt }: {
 
       {/* header */}
       <box flexDirection="row" padding={1} gap={2} border={["bottom"]} borderStyle="single">
-        <b fg="#00CFCF">gates</b>
+        <text><b fg="#00CFCF">gates</b></text>
         <text fg="#555555">{statusText}</text>
       </box>
 
@@ -188,13 +188,13 @@ export const App = ({ runEffect, systemPrompt }: {
           marginX={2}
           marginBottom={1}
         >
-          <b fg="#AA44FF">✋  Approval required — state: {hitl.state}</b>
+          <text><b fg="#AA44FF">✋  Approval required — state: {hitl.state}</b></text>
           <text fg="#333333">{"─".repeat((process.stdout.columns ?? 80) - 8)}</text>
           <text>{JSON.stringify(hitl.output, null, 2)}</text>
           <text fg="#333333">{"─".repeat((process.stdout.columns ?? 80) - 8)}</text>
           <box flexDirection="row" gap={3} marginTop={1}>
-            <b fg="#44AA44">[Y] Proceed</b>
-            <b fg="#FF4444">[N] Abort</b>
+            <text><b fg="#44AA44">[Y] Proceed</b></text>
+            <text><b fg="#FF4444">[N] Abort</b></text>
           </box>
         </box>
       )}
