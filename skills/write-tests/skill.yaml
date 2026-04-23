@@ -1,7 +1,8 @@
 id: write-tests
-version: 1
+version: 2
 description: |
   Read a source file, generate a test file alongside it, and verify the tests pass.
+  Supports complex files with many exports via `break_down` mode.
   Each state is a hard gate — the agent must produce concrete evidence
   before the Runner advances to the next state.
 
@@ -11,6 +12,11 @@ inputs:
   required:
     - name: file_path
       type: string
+  optional:
+    - name: break_down
+      type: boolean
+      default: false
+      description: "Force break_down mode for complex files"
 
 states:
   analyze:
@@ -18,13 +24,24 @@ states:
       Read the source file, identify what needs testing.
       GATE: must produce a JSON block with confirmed file path, derived test file path,
       list of items to test, and language.
+      
+      For complex files (>20 exports or ~300+ lines), set break_down: true
+      and provide chunks array.
     agent_prompt: |
       You are analyzing a source file to plan test coverage.
 
       File to test: {{inputs.file_path}}
+      Break down mode: {{inputs.break_down}}
 
       Steps you MUST complete before responding:
       1. Use read or read_lines to open the file at {{inputs.file_path}} and confirm it exists
+      2. Count exports and measure line count
+      
+      For break_down mode (triggered when file has >20 exports or ~300+ lines):
+        - Group exports into logical chunks (e.g., by export type or 10-15 items per chunk)
+        - Each chunk will be processed independently with its own test file
+      
+      Steps for standard mode:
       2. Identify all exported functions, classes, and branch logic that need test coverage
       3. Determine the test file path — place it adjacent to the source file using the
          convention `<basename>.test.<ext>` (e.g. `src/foo.ts` → `src/foo.test.ts`)
@@ -34,13 +51,39 @@ states:
       "I think the file is at X" is not enough — you must have called read or read_lines
       and seen the content.
 
-      Respond with a JSON code block:
+      Respond with a JSON code block for standard mode:
       ```json
       {
         "file_path": "confirmed/path/to/source.ts",
         "test_file_path": "confirmed/path/to/source.test.ts",
         "items_to_test": ["functionA — happy path", "functionA — error branch", "ClassB.method"],
-        "language": "typescript"
+        "language": "typescript",
+        "break_down": false
+      }
+      ```
+
+      Respond with a JSON code block for break_down mode:
+      ```json
+      {
+        "file_path": "confirmed/path/to/source.ts",
+        "test_file_path": "confirmed/path/to/__tests__/index.ts",
+        "items_to_test": [],
+        "language": "typescript",
+        "break_down": true,
+        "chunks": [
+          {
+            "index": 1,
+            "name": "types-and-helpers",
+            "items_to_test": ["TypeA", "TypeB", "helperFn1", "helperFn2"],
+            "line_range": { "start": 1, "end": 50 }
+          },
+          {
+            "index": 2,
+            "name": "classes",
+            "items_to_test": ["ClassA", "ClassA.method"],
+            "line_range": { "start": 51, "end": 120 }
+          }
+        ]
       }
       ```
     output_schema: schemas/analyze.output.schema.json
@@ -48,6 +91,9 @@ states:
     max_retries: 2
     transitions:
       - to: write
+        when: break_down == false || break_down == undefined
+      - to: chunk_write
+        when: break_down == true
 
   write:
     description: |
@@ -82,6 +128,81 @@ states:
       }
       ```
     output_schema: schemas/write.output.schema.json
+    on_error: retry
+    max_retries: 2
+    transitions:
+      - to: verify
+
+  chunk_write:
+    description: |
+      Process chunks iteratively. For each chunk, write a test file and verify it passes.
+      After all chunks pass, transitions to index state.
+    agent_prompt: |
+      Processing chunks for complex file with many exports.
+
+      Source file: {{outputs.analyze.file_path}}
+      Chunks to process: {{outputs.analyze.chunks}}
+      Total chunks: {{outputs.analyze.chunks.length}}
+
+      You will process chunks iteratively. For each chunk:
+      1. Show progress: "Processing chunk {{chunk.index}}/{{total}}..."
+      2. Read the source file to understand the code in this chunk's line range
+      3. Write test file to: {{outputs.analyze.file_path}}/__tests__/chunk-{{chunk.index}}-{{chunk.name}}.test.ts
+      4. Run bun test to verify at least one test passes
+      
+      IMPORTANT: Write tests that import from the source file. Use relative imports.
+      Example: `import { TypeA, helperFn1 } from '../source.ts'`
+
+      Start with chunk 1 and work through all chunks sequentially.
+
+      After all chunks pass, respond with a JSON code block:
+      ```json
+      {
+        "all_chunks_passed": true,
+        "chunk_results": [
+          { "index": 1, "name": "types-and-helpers", "test_file": "chunk-1-types-and-helpers.test.ts" },
+          { "index": 2, "name": "classes", "test_file": "chunk-2-classes.test.ts" }
+        ],
+        "total_chunks": 2
+      }
+      ```
+    output_schema: schemas/chunk_write.output.schema.json
+    on_error: retry
+    max_retries: 2
+    transitions:
+      - to: index
+        when: all_chunks_passed == true
+
+  index:
+    description: |
+      Create the final index.ts that re-exports all chunk test files.
+    agent_prompt: |
+      Create the index file that re-exports all chunk test files.
+
+      Chunk results: {{outputs.chunk_write.chunk_results}}
+      Target index path: {{outputs.analyze.test_file_path}}
+
+      Steps:
+      1. Write index.ts that re-exports all chunk test files:
+      ```typescript
+      // Auto-generated index - do not edit manually
+      export * from './chunk-1-types-and-helpers.test.ts'
+      export * from './chunk-2-classes.test.ts'
+      // ... more exports
+      ```
+      
+      2. Run: bash("bun test {{outputs.analyze.test_file_path}} 2>&1")
+      3. Verify the index file works correctly
+
+      Respond with a JSON code block:
+      ```json
+      {
+        "index_file_path": "path/to/__tests__/index.ts",
+        "exports_count": 2,
+        "all_passed": true
+      }
+      ```
+    output_schema: schemas/index.output.schema.json
     on_error: retry
     max_retries: 2
     transitions:

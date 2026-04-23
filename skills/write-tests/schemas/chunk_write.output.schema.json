@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "required": ["all_chunks_passed", "chunk_results", "total_chunks"],
+  "properties": {
+    "all_chunks_passed": { "type": "boolean" },
+    "chunk_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "name", "test_file"],
+        "properties": {
+          "index": { "type": "number" },
+          "name": { "type": "string" },
+          "test_file": { "type": "string" }
+        }
+      }
+    },
+    "total_chunks": { "type": "number" }
+  }
+}

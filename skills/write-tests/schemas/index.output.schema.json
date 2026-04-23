@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "required": ["index_file_path", "exports_count", "all_passed"],
+  "properties": {
+    "index_file_path": { "type": "string" },
+    "exports_count": { "type": "number" },
+    "all_passed": { "type": "boolean" }
+  }
+}

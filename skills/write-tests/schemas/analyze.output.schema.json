@@ -5,6 +5,21 @@
     "file_path": { "type": "string" },
     "test_file_path": { "type": "string" },
     "items_to_test": { "type": "array", "items": { "type": "string" } },
-    "language": { "type": "string" }
+    "language": { "type": "string" },
+    "break_down": { "type": "boolean", "description": "When true, split file into chunks for processing" },
+    "chunks": {
+      "type": "array",
+      "description": "Chunk definitions when break_down is true",
+      "items": {
+        "type": "object",
+        "required": ["index", "name", "items_to_test", "line_range"],
+        "properties": {
+          "index": { "type": "number" },
+          "name": { "type": "string", "description": "Chunk identifier for naming" },
+          "items_to_test": { "type": "array", "items": { "type": "string" } },
+          "line_range": { "type": "object", "properties": { "start": { "type": "number" }, "end": { "type": "number" } } }
+        }
+      }
+    }
   }
 }
