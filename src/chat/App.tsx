@@ -84,6 +84,13 @@ export const App = ({ runEffect, systemPrompt }: {
       handleSubmit(input)
       return
     }
+    if (key.ctrl && key.name === "k") {
+      setMsgs([])
+      setLiveLines([])
+      setCurrentState(null)
+      setRunStats(null)
+      return
+    }
     if (key.name === "escape" || (key.ctrl && key.name === "c")) renderer.destroy()
   })
 
