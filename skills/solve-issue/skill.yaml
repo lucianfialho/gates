@@ -310,18 +310,19 @@ states:
       Issue number: {{outputs.analyze.issue_number}}
       Issue title: {{outputs.analyze.issue_title}}
 
-      NOTE: The implement state should have already staged all files including
-      metadata files. If the commit fails with metadata gate error, stage
-      any missing files with bash("git add -A") before retrying.
+      CRITICAL: The metadata gate blocks commits when .metadata/summary.yaml
+      is not staged. Step 1 MUST run before every commit attempt — no exceptions.
 
       Steps:
-      1. Check staged files: bash("git diff --cached --name-only")
-      2. If implement staged metadata, proceed to step 3. Otherwise:
-         - Run: bash("git add -A") to stage all including metadata
-      3. Commit: bash("git commit -m '<summary>'")
-         - If metadata gate blocks, stage missing files and retry
-      4. Push: bash("git push -u origin {{outputs.branch.branch}} 2>&1")
-      5. Create PR with gh_pr_create:
+      1. Stage ALL files including metadata: bash("git add -A")
+         This is MANDATORY — run it even if you think files are already staged.
+         The metadata gate will block the commit if .metadata/summary.yaml is not staged.
+      2. Commit with conventional format:
+         bash("git commit -m '<type>(<scope>): <summary>\n\nCo-Authored-By: Gates <noreply@gates.dev>\nCloses #{{outputs.analyze.issue_number}}'")
+         Types: feat, fix, docs, chore, refactor, test
+         If gate blocks: read the error, stage the missing files, retry step 1.
+      3. Push: bash("git push -u origin {{outputs.branch.branch}} 2>&1")
+      4. Create PR with gh_pr_create:
          - title: "{{outputs.analyze.issue_title}}"
          - body: include summary, what was changed, and "Closes #{{outputs.analyze.issue_number}}" if issue_number is set
          - base: "main"
