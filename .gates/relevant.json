@@ -1,4 +1,5 @@
 [
   "src/chat/App.tsx",
-  "src/config/GatesConfig.ts"
+  "src/config/GatesConfig.ts",
+  "src/services/LLM.ts"
 ]
