@@ -13,6 +13,7 @@ import { Auth, AuthLayer } from "./auth/Auth.js"
 import { run } from "./agent/Loop.js"
 import { runSkill } from "./machine/Runner.js"
 import { updateContextFile } from "./context/ProjectContext.js"
+import { startChat } from "./chat/index.js"
 
 const rawArgs = process.argv.slice(2)
 const verbose = rawArgs.includes("--verbose")
@@ -215,6 +216,12 @@ const runLogs = async (runId?: string) => {
 const main = async () => {
   if (cmd === "stats") {
     await runStats()
+    return
+  }
+
+  if (cmd === "chat") {
+    const systemPrompt = await loadContext()
+    await startChat(AppLayer as never, systemPrompt)
     return
   }
 

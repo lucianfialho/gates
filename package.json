@@ -9,9 +9,13 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "latest",
+    "@types/react": "^19.2.14",
     "effect": "4.0.0-beta.55",
+    "ink": "^7.0.1",
+    "ink-text-input": "^6.0.0",
     "js-yaml": "^4.1.1",
-    "openai": "^6.34.0"
+    "openai": "^6.34.0",
+    "react": "^19.2.5"
   },
   "devDependencies": {
     "@types/bun": "latest",

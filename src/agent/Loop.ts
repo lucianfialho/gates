@@ -101,11 +101,18 @@ export interface RunResult {
   usage: { input_tokens: number; output_tokens: number }
 }
 
+export type ChatEvent =
+  | { type: "tool_call"; name: string; input: unknown }
+  | { type: "tool_result"; id: string; content: string }
+  | { type: "text"; text: string }
+  | { type: "done"; usage: { input_tokens: number; output_tokens: number } }
+
 export const run = (
   prompt: string,
   systemPrompt?: string,
   parentRunId?: string,
-  verbose?: boolean
+  verbose?: boolean,
+  onEvent?: (event: ChatEvent) => void
 ): Effect.Effect<RunResult, AgentError | GateError, RunDeps> =>
   Effect.gen(function* () {
     const llm = yield* LLMService
@@ -164,6 +171,7 @@ export const run = (
           ) {
             const last = response.content.find((b) => b.type === "text")
             const result = last?.type === "text" ? last.text : ""
+            if (result) onEvent?.({ type: "text", text: result })
             yield* Ref.set(resultRef, result)
             const totalUsage = yield* Ref.get(usageRef)
             yield* persistence.record(runId, {
@@ -186,10 +194,15 @@ export const run = (
             }
           }
 
+          for (const call of response.tool_calls) {
+            onEvent?.({ type: "tool_call", name: call.name, input: call.input })
+          }
+
           const results = yield* executeToolCalls(runId, response.tool_calls)
 
-          if (verbose) {
-            for (const result of results) {
+          for (const result of results) {
+            onEvent?.({ type: "tool_result", id: result.id, content: result.content.slice(0, 200) })
+            if (verbose) {
               console.error(`[gates] tool result: ${result.id} ${result.content.slice(0, 200)}`)
             }
           }
@@ -210,5 +223,6 @@ export const run = (
     })
 
     const totalUsage = yield* Ref.get(usageRef)
+    onEvent?.({ type: "done", usage: totalUsage })
     return { text: (yield* Ref.get(resultRef)) ?? "", usage: totalUsage }
   })
