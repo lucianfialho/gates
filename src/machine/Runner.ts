@@ -376,6 +376,10 @@ export const runSkill = (
             steps--
             continue
           }
+          if (policy === "hitl" && onHITL) {
+            const approved = yield* Effect.promise(() => onHITL(currentState, { error: msg, retryCount }, true))
+            if (approved) { retryCount++; steps--; continue }
+          }
           return yield* Effect.fail(new RunnerError(msg))
         }
 
@@ -393,6 +397,10 @@ export const runSkill = (
               retryCount++
               steps--
               continue
+            }
+            if (policy === "hitl" && onHITL) {
+              const approved = yield* Effect.promise(() => onHITL(currentState, { error: msg, retryCount }, true))
+              if (approved) { retryCount++; steps--; continue }
             }
             return yield* Effect.fail(new RunnerError(msg))
           }
