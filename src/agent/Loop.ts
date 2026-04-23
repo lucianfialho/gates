@@ -16,21 +16,24 @@ const now = () => new Date().toISOString()
 
 // Replace stale file-read results with a placeholder so they don't
 // accumulate in the message history across many tool-call rounds.
+// Tracks tool calls that produced large content — elided after staleAfterTurns
 const elideStaleReads = (messages: Message[], staleAfterTurns = 2): Message[] => {
-  // Map tool_use id → path for every "read" call
-  const readPaths = new Map<string, string>()
+  const toolLabels = new Map<string, string>()
   for (const msg of messages) {
     if (msg.role === "assistant") {
       for (const block of msg.content) {
-        if (block.type === "tool_use" && block.name === "read") {
-          const input = block.input as { path?: string }
-          readPaths.set(block.id, input.path ?? "unknown")
+        if (block.type !== "tool_use") continue
+        const input = block.input as Record<string, unknown>
+        if (block.name === "read" || block.name === "read_lines") {
+          const range = input["start"] != null ? `:${input["start"]}-${input["end"]}` : ""
+          toolLabels.set(block.id, `${block.name}(${input["path"] ?? "?"}${range})`)
+        } else if (block.name === "grep") {
+          toolLabels.set(block.id, `grep("${input["pattern"]}", ${input["path"]})`)
         }
       }
     }
   }
 
-  // Assign a turn index to each assistant message
   let turn = 0
   const assistantTurn = new Map<number, number>()
   messages.forEach((msg, i) => {
@@ -40,7 +43,6 @@ const elideStaleReads = (messages: Message[], staleAfterTurns = 2): Message[] =>
 
   return messages.map((msg, i) => {
     if (msg.role !== "tool") return msg
-    // Find the assistant message immediately before this tool block
     let prevTurn = -1
     for (let j = i - 1; j >= 0; j--) {
       const t = assistantTurn.get(j)
@@ -51,9 +53,9 @@ const elideStaleReads = (messages: Message[], staleAfterTurns = 2): Message[] =>
     return {
       ...msg,
       results: msg.results.map((r) => {
-        const path = readPaths.get(r.id)
-        return path
-          ? { id: r.id, content: `[file cached: ${path} — re-read if needed]` }
+        const label = toolLabels.get(r.id)
+        return label
+          ? { id: r.id, content: `[cached: ${label} — call again if needed]` }
           : r
       }),
     }
