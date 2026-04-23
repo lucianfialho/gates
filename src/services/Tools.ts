@@ -1,7 +1,7 @@
 import { Context, Effect, Layer } from "effect"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { readFile, writeFile } from "node:fs/promises"
+import { appendFile, readFile, writeFile } from "node:fs/promises"
 import { glob as fsGlob } from "node:fs/promises"
 import type { ToolDef } from "./LLM.js"
 
@@ -135,6 +135,31 @@ const read_lines: ToolHandler = (id, input) =>
     catch: (e) => new ToolError("read_lines", e),
   })
 
+const write_lines: ToolHandler = (id, input) =>
+  Effect.tryPromise({
+    try: async () => {
+      const { path, lines, ensure_newline = false } = input as {
+        path: string
+        lines: string[]
+        ensure_newline?: boolean
+      }
+      if (ensure_newline) {
+        let existing = ""
+        try {
+          existing = await readFile(path, "utf-8")
+        } catch {
+          // file doesn't exist yet — that's fine
+        }
+        if (existing.length > 0 && !existing.endsWith("\n")) {
+          await appendFile(path, "\n", "utf-8")
+        }
+      }
+      await appendFile(path, lines.join("\n") + "\n", "utf-8")
+      return { id, content: `Appended ${lines.length} line(s) to: ${path}` }
+    },
+    catch: (e) => new ToolError("write_lines", e),
+  })
+
 const fetch_url: ToolHandler = (id, input) =>
   Effect.tryPromise({
     try: async () => {
@@ -169,6 +194,7 @@ const handlers = new Map<string, ToolHandler>([
   ["grep", grep],
   ["fetch", fetch_url],
   ["read_lines", read_lines],
+  ["write_lines", write_lines],
 ])
 
 const definitions: ToolDef[] = [
@@ -278,6 +304,28 @@ const definitions: ToolDef[] = [
         end: { type: "number", description: "1-based inclusive end line" },
       },
       required: ["path", "start", "end"],
+    },
+  },
+  {
+    name: "write_lines",
+    description:
+      "Appends lines to a file. Creates the file if it does not exist. Use `ensure_newline` to guarantee the existing content ends with a newline before appending.",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        lines: {
+          type: "array",
+          items: { type: "string" },
+          description: "Lines to append to the file",
+        },
+        ensure_newline: {
+          type: "boolean",
+          description:
+            "If true, guarantees the file already ends with a newline before appending. Defaults to false.",
+        },
+      },
+      required: ["path", "lines"],
     },
   },
 ]
