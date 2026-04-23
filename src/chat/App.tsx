@@ -86,6 +86,21 @@ export const App = ({ runEffect, systemPrompt }: {
     const stripThinking = (text: string) =>
       text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
 
+    const sanitizeForTUI = (text: string, maxLines = 12): string => {
+      const cols = (process.stdout.columns ?? 80) - 8
+      return stripThinking(text)
+        .replace(/```[\w]*\n([\s\S]+?)```/g, (_, code: string) =>
+          code.trim().split("\n").slice(0, 4).map((l: string) => `  ${l}`).join("\n") +
+          (code.split("\n").length > 4 ? "\n  …" : ""))
+        .replace(/\*\*(.*?)\*\*/g, "$1")
+        .replace(/`([^`]+)`/g, "$1")
+        .split("\n")
+        .map((l: string) => l.length > cols ? l.slice(0, cols - 1) + "…" : l)
+        .slice(0, maxLines)
+        .join("\n")
+        .trim()
+    }
+
     const addLive = (icon: string, text: string, dim = false) =>
       setLiveLines(prev => [...prev.slice(-(MAX_LIVE - 1)), { icon, text, dim }])
 
@@ -113,7 +128,7 @@ export const App = ({ runEffect, systemPrompt }: {
       setMsgs(prev => [...prev, {
         id: String(++idRef.current),
         role: "assistant",
-        text: stripThinking(result.text) || "(no response)",
+        text: sanitizeForTUI(result.text) || "(no response)",
         tools: [...tools],
         usage: result.usage,
       }])
