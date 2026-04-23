@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "required": ["relevant_dirs", "likely_files", "research_summary"],
+  "properties": {
+    "relevant_dirs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Directories identified as relevant from .metadata/summary.yaml"
+    },
+    "likely_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Specific files likely to need changes, derived from covers fields"
+    },
+    "research_summary": {
+      "type": "string",
+      "description": "One sentence explaining what the issue touches and why"
+    },
+    "out_of_scope": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Directories explicitly NOT relevant to this issue"
+    }
+  }
+}

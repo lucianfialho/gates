@@ -2,7 +2,7 @@ id: solve-issue
 version: 1
 description: |
   Read a GitHub issue (or plain text), implement the solution with hard gates,
-  and open a PR. Full cycle: clarify → analyze → branch → implement → verify → open_pr.
+  and open a PR. Full cycle: clarify → research → analyze → branch → implement → verify → open_pr.
 
 initial_state: clarify
 
@@ -51,7 +51,7 @@ states:
     on_error: retry
     max_retries: 1
     transitions:
-      - to: analyze
+      - to: research
         when: ready == true
       - to: done_clarify
 
@@ -60,25 +60,69 @@ states:
     description: Request needs clarification before proceeding.
     agent_prompt: ""
 
+  research:
+    description: |
+      Read .metadata/summary.yaml files for indexed directories.
+      Match the issue to relevant directories using summaries only.
+      Do NOT read full source files — only summaries.
+      GATE: relevant_dirs and likely_files confirmed from metadata.
+    agent_prompt: |
+      You are researching a codebase using its metadata index.
+
+      Issue: {{inputs.issue}}
+
+      Steps you MUST follow:
+      1. Read .gates/config.yaml to find the indexed_directories list
+      2. For each indexed directory, read <dir>/.metadata/summary.yaml
+      3. Match the issue description against the title, covers, and specialist fields
+      4. Identify which directories are relevant — and which are NOT
+      5. From the covers field of relevant directories, identify likely_files
+
+      IMPORTANT: Do NOT read full source files. Summaries only.
+      The goal is to scope the work before spending tokens on actual code.
+
+      GATE CONDITION: you must have read at least 2 .metadata/summary.yaml files
+      before responding. Output must list specific files from covers fields.
+
+      Respond with a JSON code block:
+      ```json
+      {
+        "relevant_dirs": ["src/services"],
+        "likely_files": ["src/services/Logger.ts"],
+        "research_summary": "issue requires changes to X because Y",
+        "out_of_scope": ["src/auth", "src/chat"]
+      }
+      ```
+    output_schema: schemas/research.output.schema.json
+    on_error: retry
+    max_retries: 2
+    transitions:
+      - to: analyze
+
   analyze:
     description: |
-      Understand the issue. If input looks like a number, read it from GitHub.
-      Confirm affected files exist. Produce a plan.
-      GATE: confirmed file paths + plan in output.
+      Deep-read only the files identified in research.
+      Produce a precise implementation plan.
+      GATE: plan confirmed against actual file contents.
     agent_prompt: |
-      You are analyzing an issue to plan the implementation.
+      You are producing an implementation plan based on prior research.
 
-      Issue input: {{inputs.issue}}
+      Issue: {{inputs.issue}}
 
-      Steps you MUST complete:
-      1. If "{{inputs.issue}}" is a number or looks like a GitHub issue number,
-         call gh_issue_read(number) to get the full title and body.
-         Otherwise treat it as a plain text description.
-      2. Use glob or grep to find files relevant to the issue.
-      3. Use read or read_lines to confirm each file you plan to change exists.
-      4. Identify the minimal set of changes needed.
+      Research output (pre-confirmed):
+      - Relevant dirs: {{outputs.research.relevant_dirs}}
+      - Likely files:  {{outputs.research.likely_files}}
+      - Summary:       {{outputs.research.research_summary}}
+      - Out of scope:  {{outputs.research.out_of_scope}}
 
-      GATE CONDITION: confirmed file paths in hand — not guesses.
+      Steps:
+      1. If issue is a GitHub number, call gh_issue_read to get full body.
+      2. Read ONLY the files in likely_files — do not explore beyond them.
+      3. Identify the minimal change needed in each file.
+      4. Produce a step-by-step plan.
+
+      GATE CONDITION: read each file in likely_files before responding.
+      Do not invent paths — only use files confirmed in research.
 
       Respond with a JSON code block:
       ```json
@@ -91,7 +135,6 @@ states:
         "issue_number": null
       }
       ```
-      Set issue_number to the GitHub issue number if one was read, otherwise null.
     output_schema: schemas/analyze.output.schema.json
     on_error: retry
     max_retries: 2

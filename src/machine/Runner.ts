@@ -10,6 +10,7 @@ import { ToolRegistry } from "../services/Tools.js"
 import { AgentError } from "../agent/Loop.js"
 import { GateError } from "../gates/Gate.js"
 import { buildContextPrompt, updateContextFile } from "../context/ProjectContext.js"
+import { writeRelevantPaths } from "../context/RelevantPaths.js"
 import { validate } from "./schema_validate.js"
 
 export class RunnerError {
@@ -240,6 +241,11 @@ export const runSkill = (
 
       outputs[currentState] = { state: currentState, output, agentText }
       console.error(`[gates] ✓ state: ${currentState} → `, JSON.stringify(output).slice(0, 120))
+
+      // After research: write relevant paths so subsequent states get scoped context
+      if (currentState === "research") {
+        yield* Effect.promise(() => writeRelevantPaths(output))
+      }
 
       // HITL Gate — pause and require human approval before advancing
       if (stateDef.hitl_pause && onHITL) {
