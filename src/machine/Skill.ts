@@ -20,6 +20,7 @@ export interface StateDef {
   transitions?: Transition[]
   on_error?: "retry" | "skip" | "abort"  // default: abort
   max_retries?: number  // used when on_error = retry, default 2
+  hitl_pause?: boolean  // pause after this state and require human approval before continuing
 }
 
 export interface Skill {

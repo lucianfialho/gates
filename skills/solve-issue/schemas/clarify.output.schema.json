@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "required": ["ready", "questions"],
+  "properties": {
+    "ready": { "type": "boolean" },
+    "questions": { "type": "array", "items": { "type": "string" } }
+  }
+}

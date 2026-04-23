@@ -2,6 +2,7 @@ import { Effect, Layer } from "effect"
 import { readFile, readdir, access } from "node:fs/promises"
 import { resolve, join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
+import { createInterface } from "node:readline/promises"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 import { LLMLayer } from "./services/LLM.js"
@@ -72,6 +73,19 @@ const runAgent = async (prompt: string, verbose?: boolean) => {
     Effect.tap(() => Effect.promise(() => updateContextFile())),
     Effect.provide(AppLayer)
   )
+}
+
+const cliHITL = async (state: string, output: unknown): Promise<boolean> => {
+  console.log(`\n${"─".repeat(60)}`)
+  console.log(`[gates] ✋ HITL pause after: ${state}`)
+  console.log(JSON.stringify(output, null, 2))
+  console.log("─".repeat(60))
+  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  const answer = await rl.question("\nProceed with this plan? [Y/n] ")
+  rl.close()
+  const proceed = !answer.trim() || answer.trim().toLowerCase().startsWith("y")
+  if (!proceed) console.log("[gates] Plan rejected — skill aborted.")
+  return proceed
 }
 
 const parseKvArgs = (args: string[]): Record<string, string> =>
@@ -255,7 +269,7 @@ const main = async () => {
     const filteredKvArgs = kvArgs.filter(a => a !== "--json")
     const inputs = parseKvArgs(filteredKvArgs)
     const systemPrompt = await loadContext()
-    const effect = runSkill(resolve(skillShortcut), inputs, systemPrompt, verbose).pipe(
+    const effect = runSkill(resolve(skillShortcut), inputs, systemPrompt, verbose, cliHITL).pipe(
       Effect.tap((results) =>
         Effect.sync(() => {
           const states = Object.keys(results)
@@ -282,7 +296,7 @@ const main = async () => {
     const filteredKvArgs = kvArgs.filter(a => a !== '--json')
     const inputs = parseKvArgs(filteredKvArgs)
     const systemPrompt = await loadContext()
-    const effect = runSkill(resolve(skillPath), inputs, systemPrompt, verbose).pipe(
+    const effect = runSkill(resolve(skillPath), inputs, systemPrompt, verbose, cliHITL).pipe(
       Effect.tap((results) =>
         Effect.sync(() => {
           const states = Object.keys(results)

@@ -47,11 +47,14 @@ const extractJSON = (text: string): unknown | null => {
   return null
 }
 
+export type HITLCallback = (state: string, output: unknown) => Promise<boolean>
+
 export const runSkill = (
   skillPath: string,
   inputs: Record<string, string> = {},
   systemContext?: string,
-  verbose?: boolean
+  verbose?: boolean,
+  onHITL?: HITLCallback
 ): Effect.Effect<Record<string, StateResult>, RunnerError | SkillError | AgentError | GateError, RunnerDeps> =>
   Effect.gen(function* () {
     const skill = yield* loadSkill(skillPath)
@@ -195,6 +198,14 @@ export const runSkill = (
 
       outputs[currentState] = { state: currentState, output, agentText }
       console.error(`[gates] ✓ state: ${currentState} → `, JSON.stringify(output).slice(0, 120))
+
+      // HITL Gate — pause and require human approval before advancing
+      if (stateDef.hitl_pause && onHITL) {
+        const approved = yield* Effect.promise(() => onHITL(currentState, output))
+        if (!approved) {
+          return yield* Effect.fail(new RunnerError(`HITL: user rejected plan at state "${currentState}"`))
+        }
+      }
 
       const stateNames = Object.keys(skill.states)
       const currentIdx = stateNames.indexOf(currentState)

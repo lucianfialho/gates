@@ -1,0 +1,125 @@
+{
+  "updated_at": "2026-04-22T20:21:47.739Z",
+  "cwd": "/Users/lucianfialho/Code/gates",
+  "files": {
+    "src/index.ts": {
+      "lines": 238,
+      "exports": []
+    },
+    "src/services/GateRegistry.ts": {
+      "lines": 31,
+      "exports": [
+        "GateRegistryShape",
+        "GateRegistry",
+        "GateRegistryLayer"
+      ]
+    },
+    "src/services/LLM.ts": {
+      "lines": 104,
+      "exports": [
+        "LLMError",
+        "Message",
+        "ToolDef",
+        "LLMResponse",
+        "LLMShape",
+        "LLMService",
+        "LLMLayer"
+      ]
+    },
+    "src/services/Tools.ts": {
+      "lines": 297,
+      "exports": [
+        "ToolError",
+        "ToolResult",
+        "ToolRegistryShape",
+        "ToolRegistry",
+        "ToolRegistryLayer"
+      ]
+    },
+    "src/machine/Persistence.ts": {
+      "lines": 64,
+      "exports": [
+        "RunEvent",
+        "PersistenceShape",
+        "Persistence",
+        "PersistenceLayer"
+      ]
+    },
+    "src/machine/Runner.ts": {
+      "lines": 199,
+      "exports": [
+        "RunnerError",
+        "runSkill",
+        "Runner",
+        "RunnerLayer"
+      ]
+    },
+    "src/machine/Skill.ts": {
+      "lines": 107,
+      "exports": [
+        "InputDef",
+        "Transition",
+        "StateDef",
+        "Skill",
+        "SkillError",
+        "loadSkill",
+        "interpolate",
+        "resolveTransition"
+      ]
+    },
+    "src/agent/Loop.ts": {
+      "lines": 215,
+      "exports": [
+        "AgentError",
+        "RunResult",
+        "run"
+      ]
+    },
+    "src/auth/Auth.ts": {
+      "lines": 61,
+      "exports": [
+        "AuthShape",
+        "Auth",
+        "AuthLayer"
+      ]
+    },
+    "src/context/ProjectContext.ts": {
+      "lines": 92,
+      "exports": [
+        "scanProject",
+        "updateContextFile",
+        "buildContextPrompt"
+      ]
+    },
+    "src/gates/builtin.ts": {
+      "lines": 11,
+      "exports": [
+        "BuiltinGatesLayer"
+      ]
+    },
+    "src/gates/Gate.ts": {
+      "lines": 22,
+      "exports": [
+        "GateError",
+        "ToolCall",
+        "Gate"
+      ]
+    },
+    "src/gates/BashSafety.ts": {
+      "lines": 87,
+      "exports": [
+        "bashSafetyGate"
+      ]
+    }
+  },
+  "recent_changes": [
+    "bf0772e fix(runner): extractJSON prefers fenced json block over raw brace match",
+    "4f77e71 feat(tools): optional timeout parameter for bash tool",
+    "fd4a9c6 feat(context): tool-result elision + persistent project snapshot",
+    "0ee5df7 feat(cli): --verbose flag for tool call and state transition logging",
+    "2dd4ee3 fix(tools): return tool errors as content instead of crashing the state",
+    "b31fa83 feat(cli): skill shortcuts and help command",
+    "5245498 feat(runner): on_error recovery (retry|skip|abort) per state",
+    "36be846 feat(tools): add grep and fetch tools; scaffold on_error in StateDef"
+  ]
+}

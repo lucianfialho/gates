@@ -2,9 +2,9 @@ id: solve-issue
 version: 1
 description: |
   Read a GitHub issue (or plain text), implement the solution with hard gates,
-  and open a PR. Full cycle: analyze → branch → implement → verify → open_pr.
+  and open a PR. Full cycle: clarify → analyze → branch → implement → verify → open_pr.
 
-initial_state: analyze
+initial_state: clarify
 
 inputs:
   required:
@@ -13,6 +13,53 @@ inputs:
       description: GitHub issue number (e.g. "42") or plain text description
 
 states:
+  clarify:
+    description: |
+      Ambiguity Gatekeeper — check if the issue is clear enough to act on.
+      If ambiguous, list clarifying questions. If clear, proceed immediately.
+      GATE: must output ready=true or ready=false with questions.
+    agent_prompt: |
+      You are the Ambiguity Gatekeeper. Your job is to check if this request
+      is specific enough to implement without guessing.
+
+      Request: {{inputs.issue}}
+
+      Rules:
+      - If this is a GitHub issue number, it is ready (the issue has all context).
+      - If this is a text description, check: does it name specific files or behavior?
+        Is the expected outcome clear? Is there enough to write a test for it?
+      - Do NOT start implementing — only assess clarity.
+
+      Respond with a JSON code block:
+      ```json
+      {
+        "ready": true,
+        "questions": []
+      }
+      ```
+      OR if the request needs clarification:
+      ```json
+      {
+        "ready": false,
+        "questions": [
+          "What file or component should be affected?",
+          "What is the expected behavior after the fix?"
+        ]
+      }
+      ```
+    output_schema: schemas/clarify.output.schema.json
+    on_error: retry
+    max_retries: 1
+    transitions:
+      - to: analyze
+        when: ready == true
+      - to: done_clarify
+
+  done_clarify:
+    terminal: true
+    description: Request needs clarification before proceeding.
+    agent_prompt: ""
+
   analyze:
     description: |
       Understand the issue. If input looks like a number, read it from GitHub.
@@ -48,6 +95,7 @@ states:
     output_schema: schemas/analyze.output.schema.json
     on_error: retry
     max_retries: 2
+    hitl_pause: true
     transitions:
       - to: branch
 
@@ -85,26 +133,29 @@ states:
 
   implement:
     description: |
-      Make the code changes. Run typecheck.
+      Implement by Contract — follow the analyze spec exactly.
       GATE: typecheck must exit 0.
     agent_prompt: |
-      Implement the solution.
+      You are implementing by contract. The contract below was approved by the human.
+      You MUST follow it exactly — do not deviate, add features, or change scope.
 
-      Issue: {{outputs.analyze.summary}}
-      Plan: {{outputs.analyze.plan}}
-      Files to change: {{outputs.analyze.files}}
+      ═══ CONTRACT (approved by human) ═══
+      Summary: {{outputs.analyze.summary}}
+      Files:   {{outputs.analyze.files}}
+      Plan:    {{outputs.analyze.plan}}
+      ═════════════════════════════════════
 
       Steps:
-      1. Read each file before editing it
-      2. Make only the changes required — no extras
+      1. Read each file in the contract before editing
+      2. Implement ONLY what the contract specifies — nothing more
       3. Update .metadata/summary.yaml for each directory you touch:
-         - Set last_updated to today's date
-         - Set status to "filled"
+         - Set last_updated to today's date, status to "filled"
          - Stage it: bash("git add <dir>/.metadata/summary.yaml")
       4. Run: bash("bun run typecheck 2>&1")
-      5. Fix any errors and re-run until exit 0
+      5. Fix errors, re-run until exit 0
+      6. If you find you need to touch files NOT in the contract, STOP and report it
 
-      GATE CONDITION: typecheck exits 0. Run it — don't assume.
+      GATE CONDITION: typecheck exits 0 and you stayed within contract scope.
 
       Respond with a JSON code block:
       ```json
