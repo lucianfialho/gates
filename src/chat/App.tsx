@@ -344,6 +344,8 @@ export const App = ({ runEffect, systemPrompt }: {
         const inputs: Record<string, string> = {
           issue: intent.arg,
           ...(chatContext ? { chat_context: chatContext } : {}),
+          // PATCH mode + explicit skill → skip clarify+research, enter at analyze
+          ...(mode === "patch" ? { initial_state_override: "analyze" } : {}),
         }
         const modePrompt = MODE_SYSTEM[mode]
         const effectiveSystem = [systemPrompt, modePrompt].filter(Boolean).join("\n\n") || undefined

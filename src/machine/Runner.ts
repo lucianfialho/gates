@@ -129,44 +129,58 @@ export const runSkill = (
     const runId = yield* persistence.initRun(`skill:${skill.id} inputs:${JSON.stringify(inputs)}`)
 
     // ── Deterministic pre-processing (zero LLM tokens) ──────────────────────
-    const issue    = inputs["issue"]       ?? ""
-    const chatCtx  = inputs["chat_context"] ?? ""
+    const issue         = inputs["issue"]                ?? ""
+    const chatCtx       = inputs["chat_context"]         ?? ""
+    const stateOverride = inputs["initial_state_override"] ?? ""
 
-    // Extract file paths from chat context (regex, no LLM)
-    const filePattern = /(?:^|[\s"'`(])((?:src|skills|tests?)\/[\w/.-]+\.(?:ts|tsx|yaml|json|md))/gm
-    const filesInChat = [...new Set(
-      [...chatCtx.matchAll(filePattern)].map(m => (m[1] ?? "").trim())
-    )].filter(Boolean)
-
-    const isIssueNum = /^\d+$/.test(issue.trim())
-
-    // Skip clarify if: issue number OR chat already mentions specific files/context
-    if (isIssueNum || filesInChat.length > 0 || chatCtx.length > 100) {
-      outputs["clarify"] = { state: "clarify", output: { ready: true, questions: [] }, agentText: "deterministic" }
-      console.error(`[gates] ✓ clarify: skipped (deterministic) — isNum=${isIssueNum} files=${filesInChat.length} ctxLen=${chatCtx.length}`)
-    }
-
-    // Skip research if chat already has file paths
-    if (filesInChat.length > 0) {
-      const relevantDirs = [...new Set(filesInChat.map(f => f.split("/").slice(0, 2).join("/")))]
-      outputs["research"] = {
-        state: "research",
-        output: {
-          relevant_dirs: relevantDirs,
-          likely_files: filesInChat,
-          research_summary: `Files extracted from conversation: ${filesInChat.join(", ")}`,
-          out_of_scope: [],
-        },
-        agentText: "deterministic",
+    // Hard override — Gateway can force entry at any state (e.g. PATCH → analyze)
+    if (stateOverride && skill.states[stateOverride]) {
+      console.error(`[gates] ✓ initial_state_override: ${stateOverride}`)
+      // Pre-fill outputs for all skipped states so interpolation doesn't break
+      for (const stateName of Object.keys(skill.states)) {
+        if (stateName === stateOverride) break
+        const s = skill.states[stateName]
+        if (!s?.terminal) outputs[stateName] = { state: stateName, output: {}, agentText: "skipped-by-override" }
       }
-      console.error(`[gates] ✓ research: skipped (deterministic) — files: ${filesInChat.join(", ")}`)
-      yield* Effect.promise(() => writeRelevantPaths({ files: filesInChat }))
+    } else {
+      // Extract file paths from chat context (regex, no LLM)
+      const filePattern = /(?:^|[\s"'`(])((?:src|skills|tests?)\/[\w/.-]+\.(?:ts|tsx|yaml|json|md))/gm
+      const filesInChat = [...new Set(
+        [...chatCtx.matchAll(filePattern)].map(m => (m[1] ?? "").trim())
+      )].filter(Boolean)
+
+      const isIssueNum = /^\d+$/.test(issue.trim())
+
+      // Skip clarify if: issue number OR chat already mentions specific files/context
+      if (isIssueNum || filesInChat.length > 0 || chatCtx.length > 100) {
+        outputs["clarify"] = { state: "clarify", output: { ready: true, questions: [] }, agentText: "deterministic" }
+        console.error(`[gates] ✓ clarify: skipped (deterministic) — isNum=${isIssueNum} files=${filesInChat.length} ctxLen=${chatCtx.length}`)
+      }
+
+      // Skip research if chat already has file paths
+      if (filesInChat.length > 0) {
+        const relevantDirs = [...new Set(filesInChat.map(f => f.split("/").slice(0, 2).join("/")))]
+        outputs["research"] = {
+          state: "research",
+          output: {
+            relevant_dirs: relevantDirs,
+            likely_files: filesInChat,
+            research_summary: `Files extracted from conversation: ${filesInChat.join(", ")}`,
+            out_of_scope: [],
+          },
+          agentText: "deterministic",
+        }
+        console.error(`[gates] ✓ research: skipped (deterministic) — files: ${filesInChat.join(", ")}`)
+        yield* Effect.promise(() => writeRelevantPaths({ files: filesInChat }))
+      }
     }
 
     // Start from the right state based on what was pre-computed
-    let currentState = outputs["research"]  ? "analyze"   :
-                       outputs["clarify"]   ? "research"  :
-                       skill.initial_state
+    let currentState = stateOverride && skill.states[stateOverride]
+                       ? stateOverride
+                       : outputs["research"]  ? "analyze"
+                       : outputs["clarify"]   ? "research"
+                       : skill.initial_state
     // ─────────────────────────────────────────────────────────────────────────
 
     let steps = 0

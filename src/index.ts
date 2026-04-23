@@ -461,11 +461,11 @@ EXAMPLES
       }
 
       case "PATCH": {
-        // Minor change — skip clarify+research, go straight to analyze
+        // Minor change — skip clarify+research, enter skill at analyze directly
         if (hasDefaultSkill) {
           yield* runSkill(
             resolve(defaultSkill),
-            { issue: decision.intent, chat_context: "PATCH mode: skip clarify and research, go directly to analyze" },
+            { issue: decision.intent, initial_state_override: "analyze" },
             systemPrompt,
             verbose,
             cliHITL
