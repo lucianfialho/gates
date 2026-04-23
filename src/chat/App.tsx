@@ -22,46 +22,100 @@ const MODE_SYSTEM: Record<Mode, string> = {
   standard: "",
 }
 
-// Option 3 — explicit commands (zero cost, highest priority)
-const classifyExplicit = (text: string): Intent | null => {
-  const t = text.trim()
-  // Mode switches — configure the whole system
-  if (t === "@read"     || t.startsWith("@read "))     return { type: "mode-switch", mode: "read" }
-  if (t === "@patch"    || t.startsWith("@patch "))    return { type: "mode-switch", mode: "patch" }
-  if (t === "@standard" || t.startsWith("@standard ")) return { type: "mode-switch", mode: "standard" }
-  // /s <text> or /solve <text> — explicit skill trigger (any language)
-  if (/^\/s\s+/i.test(t))           return { type: "skill", skillName: "solve-issue", arg: t.replace(/^\/s\s+/i, "") }
-  if (/^\/solve\s+/i.test(t))       return { type: "skill", skillName: "solve-issue", arg: t.replace(/^\/solve\s+/i, "") }
-  if (/^\/test\s+/i.test(t))        return { type: "skill", skillName: "write-tests", arg: t.replace(/^\/test\s+/i, "") }
-  // GitHub issue number
-  if (/^\d+$/.test(t))              return { type: "skill", skillName: "solve-issue", arg: t }
-  // English explicit prefixes
-  if (/^solve(-issue)?\s+/i.test(t)) return { type: "skill", skillName: "solve-issue", arg: t.replace(/^solve(-issue)?\s+/i, "") }
-  if (/^(write-tests?|test)\s+/i.test(t)) return { type: "skill", skillName: "write-tests", arg: t.replace(/^(write-tests?|test)\s+/i, "") }
-  return null  // ambiguous → freeform
+// ── Intent Execution Mode Selection ──────────────────────────────────────────
+// Mirrors the Gateway in the reference diagram:
+// ProRN (read-only Q&A) | PATCH (minor change) | STANDARD (full lifecycle)
+
+// Step 1 — deterministic rules (zero tokens, language-agnostic patterns)
+const detectModeFromPatterns = (t: string): "proRN" | "patch" | "standard" | null => {
+  // ProRN: questions, explanations, read operations
+  const proRN = [
+    /^(what|how|why|when|where|who|which|can you|could you|do you|does|is|are)\b/i,
+    /^(o que|como|por que|quando|onde|quem|qual|você pode|consegue|faz|é|são)\b/i,
+    /\b(explain|describe|show me|list|tell me|find|look at|check|review|understand|what is|what are)\b/i,
+    /\b(explica|descreve|mostra|lista|me diz|encontra|olha|verifica|revisa|entende|o que é|quais são)\b/i,
+    /\?$/,  // ends with question mark
+  ]
+  if (proRN.some(p => p.test(t))) return "proRN"
+
+  // STANDARD: major features, new functionality, solve issues
+  const standard = [
+    /\b(add|create|implement|build|develop|make|generate|design|architect|refactor)\b/i,
+    /\b(adiciona|cria|implementa|constrói|desenvolve|faz|gera|projeta|refatora)\b/i,
+    /\b(feature|functionality|system|module|component|service|skill|capability)\b/i,
+    /\b(funcionalidade|sistema|módulo|componente|serviço|habilidade|capacidade)\b/i,
+  ]
+  if (standard.some(p => p.test(t)) && t.length > 25) return "standard"
+
+  // PATCH: small targeted changes
+  const patch = [
+    /\b(fix|correct|rename|move|update|change|modify|adjust|tweak|small|minor|quick)\b/i,
+    /\b(corrige|corrija|renomeia|move|atualiza|muda|modifica|ajusta|pequeno|menor|rápido)\b/i,
+    /\b(typo|typos|spelling|bug|error|wrong|incorrect|broken|issue)\b/i,
+    /\b(erro|errado|incorreto|quebrado|problema)\b/i,
+  ]
+  if (patch.some(p => p.test(t)) && t.length < 120) return "patch"
+
+  return null  // ambiguous — needs LLM
 }
 
-// Option 2 — LLM classifies ambiguous messages (any language, ~200 tokens)
-const classifyWithLLM = async (
+// Step 2 — LLM classification for ambiguous messages (~200 tokens)
+const detectModeWithLLM = async (
   text: string,
   runEffect: <A, E>(effect: import("effect").Effect.Effect<A, E, never>) => Promise<A>
-): Promise<Intent> => {
+): Promise<"proRN" | "patch" | "standard"> => {
   try {
     const { run } = await import("../agent/Loop.js")
-    const prompt = `Classify this message as "task" or "question". Reply with only one word.
-A "task" is: a bug report, feature request, or code change request (in any language).
-A "question" is: a general question, explanation, or chat (not requesting code changes).
+    const prompt = `Classify this developer message into ONE mode. Reply with only the mode name.
+
+Modes:
+- proRN: question, explanation request, or read-only ("what does X do?", "how does Y work?")
+- patch: small targeted code change ("fix typo", "rename variable", "update one line")
+- standard: feature addition or major change ("add command", "implement feature", "create system")
 
 Message: "${text.slice(0, 300)}"
 
 Reply:`
     const result = await runEffect(
-      run(prompt, "Reply with only 'task' or 'question'.") as unknown as import("effect").Effect.Effect<{ text: string; usage: { input_tokens: number; output_tokens: number } }, never, never>
+      run(prompt, "Reply with only: proRN, patch, or standard") as unknown as import("effect").Effect.Effect<{ text: string; usage: { input_tokens: number; output_tokens: number } }, never, never>
     )
-    const isTask = result.text.toLowerCase().includes("task")
-    return isTask
-      ? { type: "skill", skillName: "solve-issue", arg: text }
-      : { type: "freeform", arg: text }
+    const r = result.text.toLowerCase().trim()
+    if (r.includes("patch")) return "patch"
+    if (r.includes("standard")) return "standard"
+    return "proRN"
+  } catch {
+    return "proRN"  // safe default
+  }
+}
+
+// Explicit commands — override auto-detection (zero cost, highest priority)
+const classifyExplicit = (text: string): Intent | null => {
+  const t = text.trim()
+  // Mode switches — persist for session
+  if (t === "@read"     || t.startsWith("@read "))     return { type: "mode-switch", mode: "read" }
+  if (t === "@patch"    || t.startsWith("@patch "))    return { type: "mode-switch", mode: "patch" }
+  if (t === "@standard" || t.startsWith("@standard ")) return { type: "mode-switch", mode: "standard" }
+  // Explicit skill triggers
+  if (/^\/s\s+/i.test(t))           return { type: "skill", skillName: "solve-issue", arg: t.replace(/^\/s\s+/i, "") }
+  if (/^\/solve\s+/i.test(t))       return { type: "skill", skillName: "solve-issue", arg: t.replace(/^\/solve\s+/i, "") }
+  if (/^\/test\s+/i.test(t))        return { type: "skill", skillName: "write-tests", arg: t.replace(/^\/test\s+/i, "") }
+  // GitHub issue number → always STANDARD
+  if (/^\d+$/.test(t))              return { type: "skill", skillName: "solve-issue", arg: t }
+  if (/^solve(-issue)?\s+/i.test(t)) return { type: "skill", skillName: "solve-issue", arg: t.replace(/^solve(-issue)?\s+/i, "") }
+  if (/^(write-tests?|test)\s+/i.test(t)) return { type: "skill", skillName: "write-tests", arg: t.replace(/^(write-tests?|test)\s+/i, "") }
+  return null
+}
+
+// LLM classify stub (kept for backwards compat — now uses detectModeWithLLM)
+const classifyWithLLM = async (
+  text: string,
+  runEffect: <A, E>(effect: import("effect").Effect.Effect<A, E, never>) => Promise<A>
+): Promise<Intent> => {
+  try {
+    const detected = await detectModeWithLLM(text, runEffect)
+    if (detected === "standard") return { type: "skill", skillName: "solve-issue", arg: text }
+    if (detected === "patch")    return { type: "freeform", arg: text }  // patch = freeform + patch mode
+    return { type: "freeform", arg: text }
   } catch {
     return { type: "freeform", arg: text }
   }
@@ -169,7 +223,37 @@ export const App = ({ runEffect, systemPrompt }: {
   const handleSubmit = useCallback(async (value: string) => {
     if (!value.trim() || status !== "idle") return
 
-    const intent = classifyExplicit(value.trim()) ?? { type: "freeform" as const, arg: value.trim() }
+    // Intent Execution Mode Selection — 3 layers:
+    // 1. Explicit commands (@, /s, #42) — zero tokens
+    // 2. Deterministic patterns (questions, verbs) — zero tokens
+    // 3. LLM classification for ambiguous — ~200 tokens
+    const explicit = classifyExplicit(value.trim())
+    let intent: Intent
+    if (explicit) {
+      intent = explicit
+    } else {
+      const detected = detectModeFromPatterns(value.trim())
+      if (detected === "standard") {
+        intent = { type: "skill", skillName: "solve-issue", arg: value.trim() }
+      } else if (detected === "patch") {
+        // PATCH: freeform agent with patch mode system prompt
+        setMode("patch")
+        intent = { type: "freeform", arg: value.trim() }
+      } else if (detected === "proRN") {
+        // ProRN: freeform agent with read-only mode
+        setMode("read")
+        intent = { type: "freeform", arg: value.trim() }
+      } else {
+        // Ambiguous → LLM classification (~200 tokens)
+        const llmMode = await detectModeWithLLM(value.trim(), runEffect)
+        if (llmMode === "standard") {
+          intent = { type: "skill", skillName: "solve-issue", arg: value.trim() }
+        } else {
+          setMode(llmMode === "patch" ? "patch" : "read")
+          intent = { type: "freeform", arg: value.trim() }
+        }
+      }
+    }
 
     // Mode switch — no LLM call needed
     if (intent.type === "mode-switch") {
