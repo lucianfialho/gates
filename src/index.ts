@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 import { Effect, Layer } from "effect"
 import { readFile, readdir, access } from "node:fs/promises"
 import { resolve, join, dirname } from "node:path"
