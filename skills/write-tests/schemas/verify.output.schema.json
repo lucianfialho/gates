@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "required": ["passed", "checks_run", "issues"],
+  "properties": {
+    "passed": { "type": "boolean" },
+    "checks_run": { "type": "array", "items": { "type": "string" } },
+    "issues": { "type": "array", "items": { "type": "string" } }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "required": ["test_file_path", "summary", "tests_written"],
+  "properties": {
+    "test_file_path": { "type": "string" },
+    "summary": { "type": "string" },
+    "tests_written": { "type": "integer" }
+  }
+}
