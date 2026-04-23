@@ -79,7 +79,12 @@ const runAuth = (args: string[]) =>
       return
     }
 
-    console.log("Usage:\n  gates auth set <key>\n  gates auth set <provider> <key>\n  gates auth show\n  gates auth remove [provider]")
+    if (sub === "version") {
+      console.log(`gates v${require("../package.json").version}`)
+      return
+    }
+
+    console.log("Usage:\n  gates auth set <key>\n  gates auth set <provider> <key>\n  gates auth show\n  gates auth remove [provider]\n  gates auth version")
   }).pipe(Effect.provide(AuthLayer))
 
 const runAgent = async (prompt: string, verbose?: boolean) => {
@@ -318,6 +323,11 @@ const main = async () => {
 
   if (cmd === "auth") {
     await Effect.runPromise(runAuth(rest))
+    return
+  }
+
+  if (cmd === "version") {
+    console.log(`gates v${require("../package.json").version}`)
     return
   }
 
