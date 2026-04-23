@@ -12,13 +12,54 @@ type Intent =
   | { type: "skill"; skillName: "solve-issue" | "write-tests"; arg: string }
   | { type: "freeform"; arg: string }
 
-const classifyIntent = (text: string): Intent => {
+// Option 3 — explicit commands (zero cost, highest priority)
+const classifyExplicit = (text: string): Intent | null => {
   const t = text.trim()
-  if (/^\d+$/.test(t))                                                  return { type: "skill", skillName: "solve-issue", arg: t }
-  if (/^solve(-issue)?\s+/i.test(t))                                    return { type: "skill", skillName: "solve-issue", arg: t.replace(/^solve(-issue)?\s+/i, "") }
-  if (/^(write-tests?|test)\s+/i.test(t))                               return { type: "skill", skillName: "write-tests", arg: t.replace(/^(write-tests?|test)\s+/i, "") }
+  // /s <text> or /solve <text> — explicit skill trigger (any language)
+  if (/^\/s\s+/i.test(t))           return { type: "skill", skillName: "solve-issue", arg: t.replace(/^\/s\s+/i, "") }
+  if (/^\/solve\s+/i.test(t))       return { type: "skill", skillName: "solve-issue", arg: t.replace(/^\/solve\s+/i, "") }
+  if (/^\/test\s+/i.test(t))        return { type: "skill", skillName: "write-tests", arg: t.replace(/^\/test\s+/i, "") }
+  // GitHub issue number
+  if (/^\d+$/.test(t))              return { type: "skill", skillName: "solve-issue", arg: t }
+  // English explicit prefixes
+  if (/^solve(-issue)?\s+/i.test(t)) return { type: "skill", skillName: "solve-issue", arg: t.replace(/^solve(-issue)?\s+/i, "") }
+  if (/^(write-tests?|test)\s+/i.test(t)) return { type: "skill", skillName: "write-tests", arg: t.replace(/^(write-tests?|test)\s+/i, "") }
+  return null  // ambiguous → needs LLM classification
+}
+
+// Option 2 — LLM classifies ambiguous messages (any language, ~200 tokens)
+const classifyWithLLM = async (
+  text: string,
+  runEffect: <A, E>(effect: import("effect").Effect.Effect<A, E, never>) => Promise<A>
+): Promise<Intent> => {
+  try {
+    const { run } = await import("../agent/Loop.js")
+    const prompt = `Classify this message as "task" or "question". Reply with only one word.
+A "task" is: a bug report, feature request, or code change request (in any language).
+A "question" is: a general question, explanation, or chat (not requesting code changes).
+
+Message: "${text.slice(0, 300)}"
+
+Reply:`
+    const result = await runEffect(
+      run(prompt, "Reply with only 'task' or 'question'.") as unknown as import("effect").Effect.Effect<{ text: string; usage: { input_tokens: number; output_tokens: number } }, never, never>
+    )
+    const isTask = result.text.toLowerCase().includes("task")
+    return isTask
+      ? { type: "skill", skillName: "solve-issue", arg: text }
+      : { type: "freeform", arg: text }
+  } catch {
+    return { type: "freeform", arg: text }
+  }
+}
+
+// Synchronous fallback (English keywords only)
+const classifyIntent = (text: string): Intent => {
+  const explicit = classifyExplicit(text)
+  if (explicit) return explicit
+  const t = text.trim()
   if (/\b(fix|add|implement|create|refactor|build|migrate)\b/i.test(t) && t.length > 20)
-                                                                          return { type: "skill", skillName: "solve-issue", arg: t }
+    return { type: "skill", skillName: "solve-issue", arg: t }
   return { type: "freeform", arg: t }
 }
 
@@ -100,7 +141,12 @@ export const App = ({ runEffect, systemPrompt }: {
   const handleSubmit = useCallback(async (value: string) => {
     if (!value.trim() || status !== "idle") return
 
-    const intent = classifyIntent(value.trim())
+    // Try explicit classification first (zero cost), fall back to LLM for ambiguous
+    const explicit = classifyExplicit(value.trim())
+    const intent = explicit ?? (
+      // Ambiguous: use LLM to classify (any language, ~200 tokens)
+      await classifyWithLLM(value.trim(), runEffect)
+    )
     setMsgs(prev => [...prev, { id: String(++idRef.current), role: "user", text: value.trim(), tools: [] }])
     setStatus("thinking")
     setLiveLines([{ icon: "⟳", text: "thinking…", dim: true }])
