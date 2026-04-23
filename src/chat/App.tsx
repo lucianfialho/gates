@@ -223,55 +223,56 @@ export const App = ({ runEffect, systemPrompt }: {
   const handleSubmit = useCallback(async (value: string) => {
     if (!value.trim() || status !== "idle") return
 
-    // Intent Execution Mode Selection — 3 layers:
-    // 1. Explicit commands (@, /s, #42) — zero tokens
-    // 2. Deterministic patterns (questions, verbs) — zero tokens
-    // 3. LLM classification for ambiguous — ~200 tokens
-    const explicit = classifyExplicit(value.trim())
-    let intent: Intent
-    if (explicit) {
-      intent = explicit
-    } else {
-      const detected = detectModeFromPatterns(value.trim())
-      if (detected === "standard") {
-        intent = { type: "skill", skillName: "solve-issue", arg: value.trim() }
-      } else if (detected === "patch") {
-        // PATCH: freeform agent with patch mode system prompt
-        setMode("patch")
-        intent = { type: "freeform", arg: value.trim() }
-      } else if (detected === "proRN") {
-        // ProRN: freeform agent with read-only mode
-        setMode("read")
-        intent = { type: "freeform", arg: value.trim() }
-      } else {
-        // Ambiguous → LLM classification (~200 tokens)
-        const llmMode = await detectModeWithLLM(value.trim(), runEffect)
-        if (llmMode === "standard") {
-          intent = { type: "skill", skillName: "solve-issue", arg: value.trim() }
-        } else {
-          setMode(llmMode === "patch" ? "patch" : "read")
-          intent = { type: "freeform", arg: value.trim() }
-        }
-      }
-    }
+    const trimmed = value.trim()
 
-    // Mode switch — no LLM call needed
-    if (intent.type === "mode-switch") {
-      setMode(intent.mode)
+    // Explicit commands resolved synchronously — handle before showing user msg
+    const explicit = classifyExplicit(trimmed)
+    if (explicit?.type === "mode-switch") {
+      setMode(explicit.mode)
       setMsgs(prev => [...prev, {
         id: String(++idRef.current), role: "assistant",
-        text: `Mode: ${intent.mode.toUpperCase()}${intent.mode === "read" ? " — read-only, no edits" : intent.mode === "patch" ? " — minimal targeted changes" : " — full lifecycle"}`,
+        text: `Mode: ${explicit.mode.toUpperCase()}${explicit.mode === "read" ? " — read-only, no edits" : explicit.mode === "patch" ? " — minimal targeted changes" : " — full lifecycle"}`,
         tools: [],
       }])
       setInput("")
       return
     }
 
-    setMsgs(prev => [...prev, { id: String(++idRef.current), role: "user", text: value.trim(), tools: [] }])
-    setStatus("thinking")
-    setLiveLines([{ icon: "⟳", text: "thinking…", dim: true }])
-    setRunStats({ totalIn: 0, totalOut: 0, startMs: Date.now() })
+    // Show user message + clear input immediately — never wait for classification
+    setMsgs(prev => [...prev, { id: String(++idRef.current), role: "user", text: trimmed, tools: [] }])
     setInput("")
+    setStatus("thinking")
+    setLiveLines([{ icon: "⟳", text: "classifying…", dim: true }])
+    setRunStats({ totalIn: 0, totalOut: 0, startMs: Date.now() })
+
+    // Intent Execution Mode Selection — 3 layers (now async-safe, msg already shown):
+    // 1. Explicit commands (@, /s, #42) — zero tokens (handled above for mode-switch)
+    // 2. Deterministic patterns (questions, verbs) — zero tokens
+    // 3. LLM classification for ambiguous — ~200 tokens
+    let intent: Intent
+    if (explicit) {
+      intent = explicit
+    } else {
+      const detected = detectModeFromPatterns(trimmed)
+      if (detected === "standard") {
+        intent = { type: "skill", skillName: "solve-issue", arg: trimmed }
+      } else if (detected === "patch") {
+        setMode("patch")
+        intent = { type: "freeform", arg: trimmed }
+      } else if (detected === "proRN") {
+        setMode("read")
+        intent = { type: "freeform", arg: trimmed }
+      } else {
+        // Ambiguous → LLM classification (~200 tokens)
+        const llmMode = await detectModeWithLLM(trimmed, runEffect)
+        if (llmMode === "standard") {
+          intent = { type: "skill", skillName: "solve-issue", arg: trimmed }
+        } else {
+          setMode(llmMode === "patch" ? "patch" : "read")
+          intent = { type: "freeform", arg: trimmed }
+        }
+      }
+    }
 
     const tools: Array<{ text: string; isGate: boolean }> = []
 
