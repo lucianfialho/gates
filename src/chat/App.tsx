@@ -406,10 +406,10 @@ export const App = ({ runEffect, systemPrompt }: {
       )}
 
       {/* status bar — token usage + elapsed time + provider:model */}
-      {statsBar && (
+      {(statsBar || modelInfo) && (
         <box flexDirection="row" paddingX={2} height={1}>
           <box flexGrow={1} />
-          <text fg="#444444">{statsBar}</text>
+          {statsBar && <text fg="#444444">{statsBar}</text>}
           {modelInfo && <><text fg="#444444"> · </text><text fg="#555555">{modelInfo}</text></>}
         </box>
       )}
