@@ -254,9 +254,17 @@ export const runSkill = (
       outputs[currentState] = { state: currentState, output, agentText }
       console.error(`[gates] ✓ state: ${currentState} → `, JSON.stringify(output).slice(0, 120))
 
-      // After research: write relevant paths so subsequent states get scoped context
+      // After research: write files from research output
       if (currentState === "research") {
-        yield* Effect.promise(() => writeRelevantPaths(output))
+        const researchOut = output as Record<string, unknown>
+        yield* Effect.promise(() => writeRelevantPaths({ files: researchOut["likely_files"] }))
+      }
+
+      // After analyze (PRP): overwrite relevant paths with confirmed contract files
+      if (currentState === "analyze") {
+        const prp = output as Record<string, unknown>
+        const ctx = prp["context"] as Record<string, unknown> | undefined
+        yield* Effect.promise(() => writeRelevantPaths({ files: ctx?.["files"] ?? [] }))
       }
 
       // HITL Gate — pause and require human approval before advancing

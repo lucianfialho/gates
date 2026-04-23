@@ -1,0 +1,90 @@
+{
+  "type": "object",
+  "required": ["id", "context", "spec", "acceptance"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Slug for branch name and PR title, e.g. 'add-prompt-caching'"
+    },
+    "issue_number": {
+      "description": "GitHub issue number if applicable, otherwise null"
+    },
+    "issue_title": {
+      "type": "string",
+      "description": "Human-readable title for the PR"
+    },
+    "complexity": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "context": {
+      "type": "object",
+      "required": ["summary", "relevant_dirs", "files"],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "One sentence: what needs to change and why"
+        },
+        "relevant_dirs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Directories confirmed relevant from research"
+        },
+        "files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Specific files to be modified — confirmed to exist"
+        },
+        "related_issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["number", "title"],
+            "properties": {
+              "number":  { "type": "number" },
+              "title":   { "type": "string" },
+              "lesson":  { "type": "string", "description": "What to learn or avoid from this past issue" }
+            }
+          }
+        },
+        "out_of_scope": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Files and dirs explicitly NOT to touch"
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": ["root_cause", "changes", "constraints"],
+      "properties": {
+        "root_cause": {
+          "type": "string",
+          "description": "The precise technical reason for the problem"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["file", "description"],
+            "properties": {
+              "file":        { "type": "string" },
+              "description": { "type": "string" },
+              "pattern":     { "type": "string", "description": "Before/after or specific API change" }
+            }
+          }
+        },
+        "constraints": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Hard rules the implementation must follow"
+        }
+      }
+    },
+    "acceptance": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Concrete verifiable criteria — each must be checkable by running a command or reading output"
+    }
+  }
+}
