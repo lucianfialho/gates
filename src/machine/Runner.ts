@@ -10,6 +10,7 @@ import { ToolRegistry } from "../services/Tools.js"
 import { AgentError } from "../agent/Loop.js"
 import { GateError } from "../gates/Gate.js"
 import { buildContextPrompt, updateContextFile } from "../context/ProjectContext.js"
+import { validate } from "./schema_validate.js"
 
 export class RunnerError {
   readonly _tag = "RunnerError"
@@ -98,8 +99,10 @@ export const runSkill = (
         | { ok: true; text: string; usage: { input_tokens: number; output_tokens: number } }
         | { ok: false; action: "retry" | "skip"; error: RunnerError }
 
-      // Inject project context snapshot into system prompt for this state
-      const contextSnippet = yield* Effect.promise(() => buildContextPrompt())
+      // Inject project context — filter to files identified by analyze if available
+      const analyzeFiles = (outputs["analyze"]?.output as Record<string, unknown>)?.files
+      const filterFiles = Array.isArray(analyzeFiles) ? analyzeFiles as string[] : undefined
+      const contextSnippet = yield* Effect.promise(() => buildContextPrompt(filterFiles))
       const stateSystem = contextSnippet
         ? `${systemContext ?? ""}\n\n${contextSnippet}`.trim()
         : systemContext
@@ -153,12 +156,45 @@ export const runSkill = (
       let output: unknown = { result: agentText }
       if (stateDef.output_schema) {
         const parsed = extractJSON(agentText)
-        if (parsed) output = parsed
+        if (!parsed) {
+          // Gate: output_schema declared but agent returned no valid JSON
+          const policy = stateDef.on_error ?? "abort"
+          const maxRetries = stateDef.max_retries ?? 2
+          const msg = `Gate failed in state "${currentState}": output_schema declared but no JSON block found in response`
+          console.error(`[gates] ✗ ${msg}`)
+          yield* persistence.record(runId, { type: "state_error", state: currentState, policy, retryCount, error: msg, ts: new Date().toISOString() })
+          if (policy === "retry" && retryCount < maxRetries) {
+            retryCount++
+            steps--
+            continue
+          }
+          return yield* Effect.fail(new RunnerError(msg))
+        }
+
+        // Validate parsed output against schema
+        const schema = yield* Effect.promise(() => loadOutputSchema(stateDef.output_schema!, skillDir))
+        if (schema) {
+          const err = validate(parsed, schema)
+          if (err) {
+            const policy = stateDef.on_error ?? "abort"
+            const maxRetries = stateDef.max_retries ?? 2
+            const msg = `Gate failed in state "${currentState}": schema validation error — ${err}`
+            console.error(`[gates] ✗ ${msg}`)
+            yield* persistence.record(runId, { type: "state_error", state: currentState, policy, retryCount, error: msg, ts: new Date().toISOString() })
+            if (policy === "retry" && retryCount < maxRetries) {
+              retryCount++
+              steps--
+              continue
+            }
+            return yield* Effect.fail(new RunnerError(msg))
+          }
+        }
+
+        output = parsed
       }
 
       outputs[currentState] = { state: currentState, output, agentText }
-
-      console.error(`[gates] state: ${currentState} → `, JSON.stringify(output).slice(0, 120))
+      console.error(`[gates] ✓ state: ${currentState} → `, JSON.stringify(output).slice(0, 120))
 
       const stateNames = Object.keys(skill.states)
       const currentIdx = stateNames.indexOf(currentState)

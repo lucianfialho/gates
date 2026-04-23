@@ -1,6 +1,9 @@
 id: solve-issue
 version: 1
-description: Analyze a GitHub issue, plan a solution, and implement it step by step.
+description: |
+  Analyze a GitHub issue, implement the solution, and verify it.
+  Each state is a hard gate — the agent must produce concrete evidence
+  before the Runner advances to the next state.
 
 initial_state: analyze
 
@@ -11,27 +14,35 @@ inputs:
 
 states:
   analyze:
-    description: Understand the issue scope and identify affected files
+    description: |
+      Understand the issue. Confirm affected files exist. Write the plan.
+      GATE: must produce a JSON block with confirmed file paths and a plan.
+      The files list must contain only paths confirmed to exist via glob or read.
     agent_prompt: |
-      You are analyzing an issue to plan implementation.
+      You are analyzing an issue to plan the implementation.
 
       Issue: {{inputs.issue}}
 
-      Your job:
-      1. Read relevant files using the read and glob tools
-      2. Identify exactly what needs to change and why
-      3. Produce a structured plan
+      Steps you MUST complete before responding:
+      1. Use glob or grep to find files relevant to the issue
+      2. Use read or read_lines to confirm each file you plan to change actually exists
+      3. Identify the minimal set of changes needed
+
+      GATE CONDITION: You may only proceed when you have confirmed file paths in hand.
+      "I think the file is at X" is not enough — you must have called read or glob and seen the content.
 
       Respond with a JSON code block:
       ```json
       {
-        "summary": "one-sentence description of the problem",
-        "files": ["list", "of", "files", "to", "change"],
-        "plan": ["step 1", "step 2", "step 3"],
+        "summary": "one sentence describing the problem",
+        "files": ["confirmed/path/to/file.ts"],
+        "plan": ["step 1", "step 2"],
         "complexity": "low|medium|high"
       }
       ```
     output_schema: schemas/analyze.output.schema.json
+    on_error: retry
+    max_retries: 2
     transitions:
       - to: implement
         when: complexity != high
@@ -39,15 +50,13 @@ states:
         when: complexity == high
 
   break_down:
-    description: High-complexity issue — split into sub-tasks first
+    description: High-complexity — split into tasks first.
     agent_prompt: |
       The issue is complex. Break it into smaller independent tasks.
 
       Issue: {{inputs.issue}}
       Analysis: {{outputs.analyze.summary}}
       Plan: {{outputs.analyze.plan}}
-
-      Split this into 2-4 smaller tasks, each independently verifiable.
 
       Respond with a JSON code block:
       ```json
@@ -59,61 +68,81 @@ states:
       }
       ```
     output_schema: schemas/break_down.output.schema.json
+    on_error: retry
+    max_retries: 1
     transitions:
       - to: implement
 
   implement:
-    description: Write the actual code changes
+    description: |
+      Make the code changes. Run typecheck.
+      GATE: typecheck must exit 0 before this state passes.
     agent_prompt: |
-      Implement the solution. Use bash, read, write, edit, and glob tools as needed.
+      Implement the solution.
 
       Issue: {{inputs.issue}}
       Plan: {{outputs.analyze.plan}}
       Files to change: {{outputs.analyze.files}}
 
-      Rules:
-      - Make only the changes required by the plan
-      - Do not add features, comments, or abstractions beyond what is needed
-      - After each file change, verify it looks correct
+      Steps you MUST complete:
+      1. Read each file before editing it
+      2. Make only the changes required — no extra cleanup or abstractions
+      3. Run: bash("bun run typecheck 2>&1") or bash("tsc --noEmit 2>&1")
+      4. If typecheck fails, fix the errors and run again
+      5. Only respond after typecheck exits 0
 
-      When done, respond with a JSON code block:
+      GATE CONDITION: You may only respond when you have seen typecheck output
+      showing zero errors. "It should work" is not enough — run it.
+
+      Respond with a JSON code block:
       ```json
       {
-        "files_changed": ["file1", "file2"],
-        "summary": "what was done in one sentence",
-        "status": "done|partial"
+        "files_changed": ["path/to/file.ts"],
+        "summary": "one sentence of what was done",
+        "typecheck_passed": true
       }
       ```
     output_schema: schemas/implement.output.schema.json
+    on_error: retry
+    max_retries: 2
     transitions:
       - to: verify
 
   verify:
-    description: Run tests or type checks to confirm nothing broke
+    description: |
+      Independent review of the implementation.
+      GATE: passed must be true.
     agent_prompt: |
-      Verify the implementation is correct.
+      Verify the implementation independently.
 
       Changes made: {{outputs.implement.summary}}
       Files changed: {{outputs.implement.files_changed}}
 
       Steps:
-      1. Run the project's typecheck or test command if one exists
-      2. Check that the changed files have no obvious issues
-      3. Confirm the original issue is resolved
+      1. Read each changed file
+      2. Run typecheck again to confirm it still passes
+      3. Check that the original issue is addressed
+
+      GATE CONDITION: You must have run typecheck and read the changed files.
+      Do not report passed=true based on the previous state's claim — verify independently.
 
       Respond with a JSON code block:
       ```json
       {
         "passed": true,
-        "checks_run": ["typecheck", "etc"],
+        "checks_run": ["typecheck", "code review of X"],
         "issues": []
       }
       ```
     output_schema: schemas/verify.output.schema.json
+    on_error: retry
+    max_retries: 1
     transitions:
       - to: done
+        when: passed == true
+      - to: implement
 
   done:
     terminal: true
-    description: Skill complete
+    description: All gates passed. Skill complete.
     agent_prompt: ""

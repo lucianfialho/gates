@@ -1,9 +1,9 @@
 {
   "type": "object",
-  "required": ["files_changed", "summary", "status"],
+  "required": ["files_changed", "summary", "typecheck_passed"],
   "properties": {
     "files_changed": { "type": "array", "items": { "type": "string" } },
     "summary": { "type": "string" },
-    "status": { "type": "string", "enum": ["done", "partial"] }
+    "typecheck_passed": { "type": "boolean" }
   }
 }

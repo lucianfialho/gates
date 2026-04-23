@@ -1,12 +1,13 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises"
 import { glob } from "node:fs/promises"
-import { join, relative } from "node:path"
+import { join } from "node:path"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
+import { dump, load } from "js-yaml"
 
 const execFileAsync = promisify(execFile)
 
-const CONTEXT_FILE = join(process.cwd(), ".gates", "context.json")
+const CONTEXT_FILE = join(process.cwd(), ".gates", "context.yaml")
 const MAX_FILES = 80
 const EXPORT_RE = /export\s+(?:default\s+)?(?:async\s+)?(?:class|function|const|let|interface|type|enum)\s+(\w+)/g
 
@@ -17,7 +18,6 @@ interface FileEntry {
 
 interface ProjectContext {
   updated_at: string
-  cwd: string
   files: Record<string, FileEntry>
   recent_changes: string[]
 }
@@ -40,41 +40,40 @@ export const scanProject = async (): Promise<ProjectContext> => {
     if (count++ >= MAX_FILES) break
     try {
       const src = await readFile(join(process.cwd(), f), "utf-8")
-      const lines = src.split("\n").length
-      files[f] = { lines, exports: extractExports(src) }
+      files[f] = { lines: src.split("\n").length, exports: extractExports(src) }
     } catch { /* skip unreadable */ }
   }
 
   let recent_changes: string[] = []
   try {
-    const { stdout } = await execFileAsync("git", ["log", "--oneline", "-8"], { cwd: process.cwd() })
+    const { stdout } = await execFileAsync("git", ["log", "--oneline", "-6"], { cwd: process.cwd() })
     recent_changes = stdout.trim().split("\n").filter(Boolean)
-  } catch { /* not a git repo or no commits */ }
+  } catch { /* not a git repo */ }
 
-  return {
-    updated_at: new Date().toISOString(),
-    cwd: process.cwd(),
-    files,
-    recent_changes,
-  }
+  return { updated_at: new Date().toISOString(), files, recent_changes }
 }
 
 export const updateContextFile = async (): Promise<void> => {
   try {
     await mkdir(join(process.cwd(), ".gates"), { recursive: true })
     const ctx = await scanProject()
-    await writeFile(CONTEXT_FILE, JSON.stringify(ctx, null, 2))
+    await writeFile(CONTEXT_FILE, dump(ctx, { lineWidth: 120 }))
   } catch { /* best-effort */ }
 }
 
-export const buildContextPrompt = async (): Promise<string | null> => {
+export const buildContextPrompt = async (filterFiles?: string[]): Promise<string | null> => {
   try {
     const raw = await readFile(CONTEXT_FILE, "utf-8")
-    const ctx = JSON.parse(raw) as ProjectContext
+    const ctx = load(raw) as ProjectContext
 
-    const fileLines = Object.entries(ctx.files)
+    const allFiles = Object.entries(ctx.files)
+    const relevant = filterFiles?.length
+      ? allFiles.filter(([path]) => filterFiles.some((f) => path.includes(f) || f.includes(path)))
+      : allFiles
+
+    const fileLines = relevant
       .map(([path, { lines, exports }]) =>
-        `  ${path} (${lines} lines)${exports.length ? ` — exports: ${exports.join(", ")}` : ""}`
+        `  ${path} (${lines} lines)${exports.length ? ` — exports: ${exports.slice(0, 6).join(", ")}` : ""}`
       )
       .join("\n")
 
