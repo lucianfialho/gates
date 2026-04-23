@@ -411,6 +411,7 @@ export const runSkill = (
       }
 
       outputs[currentState] = { state: currentState, output, agentText }
+      yield* persistence.record(runId, { type: "state_complete", state: currentState, output, agentText: agentText.slice(0, 200), ts: new Date().toISOString() })
       console.error(`[gates] ✓ state: ${currentState} → `, JSON.stringify(output).slice(0, 120))
 
       // After research: write files from research output
