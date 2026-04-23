@@ -6,6 +6,84 @@ Inspired by Jesse Vincent's [Rules and Gates](https://blog.fsck.com/2026/04/07/r
 
 ---
 
+## Architecture
+
+```mermaid
+flowchart TB
+  classDef input     fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
+  classDef gateway   fill:#fef9c3,stroke:#ca8a04,color:#713f12
+  classDef gates_cls fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+  classDef context   fill:#fce7f3,stroke:#db2777,color:#831843
+  classDef knowledge fill:#dcfce7,stroke:#16a34a,color:#14532d
+  classDef hooks     fill:#ffedd5,stroke:#ea580c,color:#7c2d12
+  classDef skill     fill:#f3e8ff,stroke:#9333ea,color:#3b0764
+
+  subgraph INPUT["  Input  "]
+    UP["⊙ User Prompt"]
+    SC["⊙ gates chat · solve-issue N · write-tests path"]
+  end
+
+  subgraph GATEWAY["  Gateway  "]
+    IEM{{"Intent Router"}}
+    QA["CHAT — Q&A"]
+    PATCH["PATCH — Direct prompt"]
+    STANDARD["STANDARD — Full lifecycle"]
+  end
+
+  subgraph GATES["  Gates  "]
+    BS["BashSafety\nblocks force-push · rm -rf"]
+    MG["Metadata Gate\nblocks commit without .metadata"]
+    SV["Schema Validator\nblocks state without valid JSON"]
+  end
+
+  subgraph CONTEXT["  Context  "]
+    CM["CLAUDE.md — system prompt"]
+    CY[".gates/context.yaml — file tree"]
+    EL["Elision — stale reads cached"]
+  end
+
+  subgraph KNOWLEDGE["  Knowledge  "]
+    META[".metadata/summary.yaml\nper indexed directory"]
+    SKILLDIR["skills/ — YAML state machines"]
+    RUNS[".gates/runs/*.jsonl — audit trail"]
+  end
+
+  subgraph HOOKS["  Hooks  "]
+    PRE["pre_hook — BashSafety"]
+    GUARD["guard_hook — Metadata gate"]
+    POST["post_hook — update context.yaml"]
+    FAIL["fall_hook — retry · skip · abort"]
+  end
+
+  subgraph LIFECYCLE["  Skill Lifecycle  "]
+    direction LR
+    S1["analyze\ngate: files confirmed"] --> S2["branch\ngate: checkout ✓"]
+    S2 --> S3["implement\ngate: typecheck ✓"]
+    S3 --> S4["verify\ngate: passed=true"]
+    S4 -->|passed| S5["open_pr\ngate: PR URL ✓"] --> DONE(["done ✓"])
+    S4 -->|failed| S3
+  end
+
+  UP & SC --> IEM
+  IEM -->|question| QA
+  IEM -->|quick fix| PATCH
+  IEM -->|skill| STANDARD --> LIFECYCLE
+  GATES -.->|enforces| LIFECYCLE
+  CONTEXT -.->|injects| LIFECYCLE
+  KNOWLEDGE -.->|indexes| LIFECYCLE
+  HOOKS -.->|intercepts| LIFECYCLE
+
+  class UP,SC input
+  class IEM,QA,PATCH,STANDARD gateway
+  class BS,MG,SV gates_cls
+  class CM,CY,EL context
+  class META,SKILLDIR,RUNS knowledge
+  class PRE,GUARD,POST,FAIL hooks
+  class S1,S2,S3,S4,S5,DONE skill
+```
+
+---
+
 ## The idea
 
 Most coding agents give the model instructions and hope it follows them. That's a rule. Gates is different: each state in a skill has an `output_schema` that the runner validates before advancing. No valid JSON block → retry. Schema mismatch → retry. The model can't rationalize past a gate.
