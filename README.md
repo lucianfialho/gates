@@ -17,69 +17,104 @@ flowchart TB
   classDef knowledge fill:#dcfce7,stroke:#16a34a,color:#14532d
   classDef hooks     fill:#ffedd5,stroke:#ea580c,color:#7c2d12
   classDef skill     fill:#f3e8ff,stroke:#9333ea,color:#3b0764
+  classDef hitl      fill:#fdf4ff,stroke:#a855f7,color:#581c87
 
+  %% ── INPUT ──────────────────────────────────────────────────────
   subgraph INPUT["  Input  "]
     UP["⊙ User Prompt"]
-    SC["⊙ gates chat · solve-issue N · write-tests path"]
+    SC["⊙ Shortcuts  #42 · solve-issue · write-tests · @chat"]
   end
 
-  subgraph GATEWAY["  Gateway  "]
-    IEM{{"Intent Router"}}
-    QA["CHAT — Q&A"]
-    PATCH["PATCH — Direct prompt"]
-    STANDARD["STANDARD — Full lifecycle"]
-  end
-
-  subgraph GATES["  Gates  "]
-    BS["BashSafety\nblocks force-push · rm -rf"]
-    MG["Metadata Gate\nblocks commit without .metadata"]
-    SV["Schema Validator\nblocks state without valid JSON"]
-  end
-
-  subgraph CONTEXT["  Context  "]
-    CM["CLAUDE.md — system prompt"]
-    CY[".gates/context.yaml — file tree"]
-    EL["Elision — stale reads cached"]
-  end
-
-  subgraph KNOWLEDGE["  Knowledge  "]
-    META[".metadata/summary.yaml\nper indexed directory"]
-    SKILLDIR["skills/ — YAML state machines"]
-    RUNS[".gates/runs/*.jsonl — audit trail"]
-  end
-
-  subgraph HOOKS["  Hooks  "]
-    PRE["pre_hook — BashSafety"]
-    GUARD["guard_hook — Metadata gate"]
-    POST["post_hook — update context.yaml"]
-    FAIL["fall_hook — retry · skip · abort"]
-  end
-
-  subgraph LIFECYCLE["  Skill Lifecycle  "]
-    direction LR
-    S1["analyze\ngate: files confirmed"] --> S2["branch\ngate: checkout ✓"]
-    S2 --> S3["implement\ngate: typecheck ✓"]
-    S3 --> S4["verify\ngate: passed=true"]
-    S4 -->|passed| S5["open_pr\ngate: PR URL ✓"] --> DONE(["done ✓"])
-    S4 -->|failed| S3
+  %% ── GATEWAY ─────────────────────────────────────────────────────
+  subgraph GATEWAY["  Gateway — Intent Router  "]
+    IEM{{"classifyIntent()"}}
+    QA["CHAT\nQ&A · explain · explore"]
+    PATCH["PATCH\nDirect agent prompt"]
+    STANDARD["STANDARD\nFull skill lifecycle"]
   end
 
   UP & SC --> IEM
   IEM -->|question| QA
   IEM -->|quick fix| PATCH
-  IEM -->|skill| STANDARD --> LIFECYCLE
-  GATES -.->|enforces| LIFECYCLE
-  CONTEXT -.->|injects| LIFECYCLE
-  KNOWLEDGE -.->|indexes| LIFECYCLE
-  HOOKS -.->|intercepts| LIFECYCLE
+  IEM -->|#N · fix · add · implement| STANDARD
+
+  %% ── GATES ───────────────────────────────────────────────────────
+  subgraph GATES["  Gates  "]
+    direction TB
+    AG["Ambiguity Gatekeeper\nclarify state — blocks unclear requests\nreturns questions if not actionable"]
+    BS["BashSafety Gate\nblocks force-push · rm -rf · bad scripts"]
+    MG["Metadata Gate\nblocks git commit without .metadata updated"]
+    SV["Schema Validator\nblocks state transition without valid JSON"]
+  end
+
+  %% ── CONTEXT ──────────────────────────────────────────────────────
+  subgraph CONTEXT["  Context  "]
+    direction TB
+    CM["CLAUDE.md\nProject docs → system prompt"]
+    CY[".gates/context.yaml\nAuto file tree + exports + git log"]
+    EL["Tool-result Elision\nStale reads → [cached] after 3 turns"]
+    FIL["Selective injection\nOnly files from analyze output"]
+  end
+
+  %% ── KNOWLEDGE ────────────────────────────────────────────────────
+  subgraph KNOWLEDGE["  Knowledge  "]
+    direction TB
+    META[".metadata/summary.yaml\nPer indexed directory — agent-maintained"]
+    CFG[".gates/config.yaml\nDeclares indexed directories"]
+    SKILLDIR["skills/ index\nsolve-issue · write-tests · custom"]
+    RUNS[".gates/runs/*.jsonl\nAppend-only audit trail per run"]
+  end
+
+  %% ── HOOKS ────────────────────────────────────────────────────────
+  subgraph HOOKS["  Hooks  "]
+    direction TB
+    PRE["pre_hook\nBashSafety intercepts every Bash call"]
+    GUARD["guard_hook\nMetadata gate intercepts git commit"]
+    POST["post_hook\nUpdate context.yaml after run"]
+    FAIL["fall_hook\non_error: retry · skip · abort per state"]
+  end
+
+  %% ── HITL GATE ────────────────────────────────────────────────────
+  subgraph HITL_BOX["  HITL Gate  "]
+    HITL["✋ Human Approval\nShows analyze output\nY → proceed · N → abort\nCLI readline or TUI panel"]
+  end
+
+  %% ── SKILL LIFECYCLE ──────────────────────────────────────────────
+  subgraph LIFECYCLE["  Skill Lifecycle — solve-issue  "]
+    direction LR
+    S0["clarify\n─────\ngate: ready=true\nor return questions"]
+    S1["analyze\n─────\ngate: confirmed\nfile paths + plan\nhitl_pause ✋"]
+    S2["branch\n─────\ngate: git checkout\n--show-current ✓"]
+    S3["implement\n─────\nBY CONTRACT ═══\ngate: typecheck ✓"]
+    S4["verify\n─────\ngate: passed=true\nindependent run"]
+    S5["open_pr\n─────\ngate: PR URL\nin output"]
+    DONE(["done ✓"])
+
+    S0 -->|ready=true| S1
+    S0 -->|ready=false| QOUT(["return questions"])
+    S1 --> HITL_GATE{{"HITL ✋"}}
+    HITL_GATE -->|approved| S2
+    HITL_GATE -->|rejected| ABORT(["aborted"])
+    S2 --> S3 --> S4
+    S4 -->|passed| S5 --> DONE
+    S4 -->|failed| S3
+  end
+
+  STANDARD --> LIFECYCLE
+  GATES     -.->|enforces| LIFECYCLE
+  CONTEXT   -.->|injects into system prompt| LIFECYCLE
+  KNOWLEDGE -.->|indexes + audits| LIFECYCLE
+  HOOKS     -.->|intercepts tool calls| LIFECYCLE
+  HITL_BOX  -.->|pauses between states| LIFECYCLE
 
   class UP,SC input
   class IEM,QA,PATCH,STANDARD gateway
-  class BS,MG,SV gates_cls
-  class CM,CY,EL context
-  class META,SKILLDIR,RUNS knowledge
+  class AG,BS,MG,SV gates_cls
+  class CM,CY,EL,FIL context
+  class META,CFG,SKILLDIR,RUNS knowledge
   class PRE,GUARD,POST,FAIL hooks
-  class S1,S2,S3,S4,S5,DONE skill
+  class S0,S1,S2,S3,S4,S5,DONE skill
+  class HITL_GATE,HITL hitl
 ```
 
 ---
