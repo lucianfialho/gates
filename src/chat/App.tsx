@@ -66,19 +66,26 @@ const classifyIntent = (text: string): Intent => {
 const resolveSkillPath = (skillName: string): string =>
   join(process.cwd(), "skills", skillName, "skill.yaml")
 
+// Strip cwd from paths so tool summaries stay short
+const cwd = process.cwd()
+const shortPath = (p: unknown) =>
+  String(p ?? "").replace(cwd + "/", "").replace(cwd, "").slice(0, 45)
+
 const toolSummary = (name: string, input: unknown): string => {
   const inp = input as Record<string, unknown>
+  const cols = (process.stdout.columns ?? 80) - 20
   const hint =
-    name === "read"       ? String(inp.path ?? "") :
-    name === "read_lines" ? `${inp.path}:${inp.start}-${inp.end}` :
-    name === "edit"       ? String(inp.path ?? "") :
-    name === "write"      ? String(inp.path ?? "") :
-    name === "bash"       ? String(inp.command ?? "").slice(0, 40) :
-    name === "glob"       ? String(inp.pattern ?? "") :
-    name === "grep"       ? `"${inp.pattern}" ${inp.path}` :
+    name === "read"       ? shortPath(inp.path) :
+    name === "read_lines" ? `${shortPath(inp.path)}:${inp.start}-${inp.end}` :
+    name === "edit"       ? shortPath(inp.path) :
+    name === "write"      ? shortPath(inp.path) :
+    name === "bash"       ? String(inp.command ?? "").slice(0, 45) :
+    name === "glob"       ? String(inp.pattern ?? "").slice(0, 30) :
+    name === "grep"       ? `"${String(inp.pattern ?? "").slice(0, 20)}" ${shortPath(inp.path)}` :
     name === "fetch"      ? String(inp.url ?? "").replace(/^https?:\/\//, "").slice(0, 40) :
-    JSON.stringify(inp).slice(0, 40)
-  return `${name}(${hint})`
+    JSON.stringify(inp).slice(0, 35)
+  const full = `${name}(${hint})`
+  return full.length > cols ? full.slice(0, cols - 1) + "…" : full
 }
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -332,7 +339,7 @@ export const App = ({ runEffect, systemPrompt }: {
                 {msg.tools.map((t, i) => (
                   <box key={i} flexDirection="row" gap={1}>
                     <text fg={t.isGate ? "#FF4444" : "#888800"}>  {t.isGate ? "⛔" : "⚙"}</text>
-                    <text fg={t.isGate ? "#FF6666" : "#555555"}>{t.text}</text>
+                    <text width={cols - 8} fg={t.isGate ? "#FF6666" : "#555555"}>{t.text}</text>
                   </box>
                 ))}
                 <box flexDirection="row" gap={1}>
@@ -355,7 +362,10 @@ export const App = ({ runEffect, systemPrompt }: {
                 <text fg={line.icon === "⛔" ? "#FF4444" : line.dim ? "#444444" : "#888800"}>
                   {line.icon}
                 </text>
-                <text fg={line.icon === "⛔" ? "#FF6666" : line.dim ? "#444444" : "#666666"}>
+                <text
+                  width={cols - 6}
+                  fg={line.icon === "⛔" ? "#FF6666" : line.dim ? "#444444" : "#666666"}
+                >
                   {line.text}
                 </text>
               </box>
