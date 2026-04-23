@@ -1,15 +1,18 @@
 import React from "react"
 import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
 import { App } from "./App.js"
 
-type RunFn = <A, E>(effect: Effect.Effect<A, E, never>) => Promise<A>
-
-export const startChat = async (_appLayer: unknown, systemPrompt?: string) => {
+export const startChat = async (appLayer: Layer.Layer<never>, systemPrompt?: string) => {
   const renderer = await createCliRenderer({ exitOnCtrlC: true })
   const root = createRoot(renderer)
-  const runEffect: RunFn = (effect) => Effect.runPromise(effect)
+
+  // Every effect from the chat gets the full app layer provided
+  const runEffect = <A, E>(effect: Effect.Effect<A, E, never>): Promise<A> =>
+    Effect.runPromise(
+      effect.pipe(Effect.provide(appLayer as Layer.Layer<never, never, never>))
+    )
 
   root.render(
     <App
@@ -18,7 +21,6 @@ export const startChat = async (_appLayer: unknown, systemPrompt?: string) => {
     />
   )
 
-  // Wait until the renderer is destroyed (ESC or Ctrl+C)
   await new Promise<void>(resolve => {
     renderer.on("destroy", resolve)
   })
