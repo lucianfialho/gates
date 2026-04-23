@@ -62,7 +62,8 @@ const elideStaleReads = (messages: Message[], staleAfterTurns = 3): Message[] =>
 
 const executeToolCalls = (
   runId: string,
-  calls: ToolCall[]
+  calls: ToolCall[],
+  onEvent?: (event: ChatEvent) => void
 ): Effect.Effect<ToolResult[], AgentError | GateError, RunDeps> =>
   Effect.gen(function* () {
     const gates = yield* GateRegistry
@@ -73,8 +74,9 @@ const executeToolCalls = (
       calls,
       (call: ToolCall) =>
         gates.enforce(call).pipe(
-          Effect.catchTag("GateError", (e) =>
-            persistence
+          Effect.catchTag("GateError", (e) => {
+            onEvent?.({ type: "gate_block", gate: e.gate, reason: e.reason })
+            return persistence
               .record(runId, {
                 type: "gate_block",
                 gate: e.gate,
@@ -83,7 +85,7 @@ const executeToolCalls = (
                 ts: now(),
               })
               .pipe(Effect.andThen(Effect.fail(e)))
-          ),
+          }),
           Effect.andThen(
             tools.execute(call.id, call.name, call.input).pipe(
               Effect.catchTag("ToolError", (e: ToolError) =>
@@ -104,6 +106,7 @@ export interface RunResult {
 export type ChatEvent =
   | { type: "tool_call"; name: string; input: unknown }
   | { type: "tool_result"; id: string; content: string }
+  | { type: "gate_block"; gate: string; reason: string }
   | { type: "text"; text: string }
   | { type: "done"; usage: { input_tokens: number; output_tokens: number } }
 
@@ -198,7 +201,7 @@ export const run = (
             onEvent?.({ type: "tool_call", name: call.name, input: call.input })
           }
 
-          const results = yield* executeToolCalls(runId, response.tool_calls)
+          const results = yield* executeToolCalls(runId, response.tool_calls, onEvent)
 
           for (const result of results) {
             onEvent?.({ type: "tool_result", id: result.id, content: result.content.slice(0, 200) })
