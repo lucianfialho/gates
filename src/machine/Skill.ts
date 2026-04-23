@@ -23,6 +23,7 @@ export interface StateDef {
   max_retries?: number  // used when on_error = retry, default 2
   hitl_pause?: boolean  // pause after this state and require human approval before continuing
   timeout_ms?: number   // max ms to wait for the agent on this state, default unlimited
+  budget_tokens?: number  // max input+output tokens for this state — triggers on_error if exceeded
 }
 
 export interface Skill {

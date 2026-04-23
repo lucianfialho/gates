@@ -326,6 +326,27 @@ export const runSkill = (
       totalInput += usage.input_tokens
       totalOutput += usage.output_tokens
 
+      // Budget gate — enforce token limit per state
+      if (stateDef.budget_tokens) {
+        const stateTokens = usage.input_tokens + usage.output_tokens
+        const pct = Math.round((stateTokens / stateDef.budget_tokens) * 100)
+        if (stateTokens > stateDef.budget_tokens) {
+          const msg = `Budget exceeded in "${currentState}": ${stateTokens.toLocaleString()} tokens used, budget was ${stateDef.budget_tokens.toLocaleString()}`
+          console.error(`[gates] ⚠ ${msg}`)
+          onEvent?.({ type: "gate_block", gate: "budget", reason: msg })
+          const policy = stateDef.on_error ?? "abort"
+          if (policy === "hitl" && onHITL) {
+            const approved = yield* Effect.promise(() => onHITL(currentState, { budget_exceeded: stateTokens, budget: stateDef.budget_tokens }, true))
+            if (!approved) return yield* Effect.fail(new RunnerError(msg))
+          } else if (policy !== "skip") {
+            return yield* Effect.fail(new RunnerError(msg))
+          }
+        } else if (pct >= 80) {
+          console.error(`[gates] ⚠ budget warning: "${currentState}" at ${pct}% (${stateTokens.toLocaleString()}/${stateDef.budget_tokens.toLocaleString()})`)
+          onEvent?.({ type: "gate_block", gate: "budget-warning", reason: `${currentState} at ${pct}% of token budget` })
+        }
+      }
+
       let output: unknown = { result: agentText }
       if (stateDef.output_schema) {
         const parsed = extractJSON(agentText)
