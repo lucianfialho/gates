@@ -279,7 +279,7 @@ export const App = ({ runEffect, systemPrompt }: {
     const stripThinking = (text: string) =>
       text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
 
-    const sanitizeForTUI = (text: string, maxLines = 12): string => {
+    const sanitizeForTUI = (text: string, maxLines = Math.max(30, termSize.rows - 8)): string => {
       const cols = (termSize.cols) - 8
       return stripThinking(text)
         .replace(/```[\w]*\n([\s\S]+?)```/g, (_, code: string) =>
