@@ -185,6 +185,47 @@ const fetch_url: ToolHandler = (id, input) =>
     catch: (e) => new ToolError("fetch", e),
   })
 
+const gh_issue_read: ToolHandler = (id, input) =>
+  Effect.tryPromise({
+    try: async () => {
+      const { number } = input as { number: number | string }
+      const { stdout } = await execFileAsync("gh", ["issue", "view", String(number), "--json", "number,title,body,labels,state,url"])
+      return { id, content: stdout.trim() }
+    },
+    catch: (e) => new ToolError("gh_issue_read", e),
+  })
+
+const gh_issue_list: ToolHandler = (id, _input) =>
+  Effect.tryPromise({
+    try: async () => {
+      const { stdout } = await execFileAsync("gh", ["issue", "list", "--json", "number,title,state,labels", "--limit", "20"])
+      return { id, content: stdout.trim() }
+    },
+    catch: (e) => new ToolError("gh_issue_list", e),
+  })
+
+const gh_issue_create: ToolHandler = (id, input) =>
+  Effect.tryPromise({
+    try: async () => {
+      const { title, body, labels } = input as { title: string; body: string; labels?: string[] }
+      const args = ["issue", "create", "--title", title, "--body", body]
+      if (labels?.length) args.push("--label", labels.join(","))
+      const { stdout } = await execFileAsync("gh", args)
+      return { id, content: stdout.trim() }
+    },
+    catch: (e) => new ToolError("gh_issue_create", e),
+  })
+
+const gh_pr_create: ToolHandler = (id, input) =>
+  Effect.tryPromise({
+    try: async () => {
+      const { title, body, base = "main" } = input as { title: string; body: string; base?: string }
+      const { stdout } = await execFileAsync("gh", ["pr", "create", "--title", title, "--body", body, "--base", base])
+      return { id, content: stdout.trim() }
+    },
+    catch: (e) => new ToolError("gh_pr_create", e),
+  })
+
 const handlers = new Map<string, ToolHandler>([
   ["bash", bash],
   ["read", read],
@@ -195,6 +236,10 @@ const handlers = new Map<string, ToolHandler>([
   ["fetch", fetch_url],
   ["read_lines", read_lines],
   ["write_lines", write_lines],
+  ["gh_issue_read", gh_issue_read],
+  ["gh_issue_list", gh_issue_list],
+  ["gh_issue_create", gh_issue_create],
+  ["gh_pr_create", gh_pr_create],
 ])
 
 const definitions: ToolDef[] = [
@@ -326,6 +371,46 @@ const definitions: ToolDef[] = [
         },
       },
       required: ["path", "lines"],
+    },
+  },
+  {
+    name: "gh_issue_read",
+    description: "Read a GitHub issue by number. Returns title, body, labels, state, and URL as JSON.",
+    input_schema: {
+      type: "object",
+      properties: { number: { type: "number", description: "Issue number" } },
+      required: ["number"],
+    },
+  },
+  {
+    name: "gh_issue_list",
+    description: "List open GitHub issues (up to 20). Returns JSON array with number, title, state, labels.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "gh_issue_create",
+    description: "Create a GitHub issue. Returns the URL of the created issue.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        body: { type: "string", description: "Markdown body of the issue" },
+        labels: { type: "array", items: { type: "string" }, description: "Optional labels" },
+      },
+      required: ["title", "body"],
+    },
+  },
+  {
+    name: "gh_pr_create",
+    description: "Create a GitHub PR from the current branch. Returns the PR URL.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        body: { type: "string", description: "Markdown body of the PR" },
+        base: { type: "string", description: "Base branch. Defaults to main." },
+      },
+      required: ["title", "body"],
     },
   },
 ]
