@@ -104,6 +104,20 @@ const cliHITL = async (state: string, output: unknown): Promise<boolean> => {
   return proceed
 }
 
+// Log formatting utilities
+const truncate = (s: unknown, max = 60): { value: string; originalLength: number } => {
+  const str = typeof s === "string" ? s : JSON.stringify(s)
+  return { value: str.length > max ? str.slice(0, max) + "…" : str, originalLength: str.length }
+}
+const ANSI = { reset: "\x1b[0m", green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m", blue: "\x1b[34m", dim: "\x1b[2m" }
+const colorize = (type: string, text: string): string => {
+  const c = type.includes("pass") || type.includes("complete") ? ANSI.green :
+            type.includes("block") || type.includes("fail") ? ANSI.red :
+            type.includes("request") || type.includes("call") ? ANSI.yellow :
+            type.includes("response") || type.includes("result") ? ANSI.blue : ANSI.dim
+  return `${c}${text}${ANSI.reset}`
+}
+
 const parseKvArgs = (args: string[]): Record<string, string> =>
   Object.fromEntries(
     args.flatMap((a) => {
@@ -180,35 +194,49 @@ const runLogs = async (runId?: string) => {
     const lines = (await readFile(join(runsDir, match), "utf-8")).split("\n").filter(Boolean)
     const events = lines.map((l) => { try { return JSON.parse(l) as Record<string, unknown> } catch { return null } }).filter(Boolean)
     console.log(`\nRun: ${match.replace(".jsonl", "")}`)
-    console.log("─".repeat(80))
+    console.log("─".repeat(100))
+    console.log(`${"timestamp".padEnd(28)} ${"event".padEnd(15)} ${"gate".padEnd(20)} ${"tool".padEnd(15)} duration`)
+    console.log("─".repeat(100))
     for (const ev of events) {
-      const ts = typeof ev!.ts === "string" ? ev!.ts as string : ""
-      const time = ts.length >= 19 ? ts.slice(11, 19) : ts
+      const rawTs = ev!.ts as string ?? ""
+      const timestamp = rawTs.length >= 19 ? rawTs : ""
       const type = String(ev!.type ?? "unknown")
+      const gate = String(ev!.gate ?? "")
+      const tool = String(ev!.tool ?? "")
+      const duration = ev!.duration !== undefined ? `${ev!.duration}ms` : ""
+
       let detail = ""
       if (type === "run_start") {
-        const prompt = String(ev!.prompt ?? "").slice(0, 60).replace(/\n/g, " ")
-        detail = `prompt="${prompt}${String(ev!.prompt ?? "").length > 60 ? "…" : ""}"`
+        const { value, originalLength } = truncate(ev!.prompt, 60)
+        detail = `prompt="${value}"${originalLength > 60 ? ` [${originalLength} chars]` : ""}`
       } else if (type === "run_complete") {
         detail = `input_tokens=${ev!.total_input_tokens} output_tokens=${ev!.total_output_tokens}`
       } else if (type === "llm_response") {
         detail = `stop_reason=${ev!.stop_reason} input_tokens=${ev!.input_tokens} output_tokens=${ev!.output_tokens}`
-      } else if (type === "tool_call") {
-        detail = `tool=${ev!.tool} id=${ev!.tool_use_id}`
-      } else if (type === "tool_result") {
-        detail = `tool=${ev!.tool} id=${ev!.tool_use_id}`
       } else if (type === "gate_block") {
-        detail = `gate=${ev!.gate} reason=${ev!.reason}`
-      } else if (type === "gate_pass") {
-        detail = `gate=${ev!.gate}`
+        const { value, originalLength } = truncate(ev!.reason, 60)
+        detail = `reason="${value}"${originalLength > 60 ? ` [${originalLength} chars]` : ""}`
+      } else if (type === "tool_result") {
+        const { value, originalLength } = truncate(ev!.content, 60)
+        detail = `content="${value}"${originalLength > 60 ? ` [${originalLength} chars]` : ""}`
       } else {
-        // Render remaining fields except type and ts
-        const rest2 = Object.entries(ev!).filter(([k]) => k !== "type" && k !== "ts")
-        detail = rest2.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(" ").slice(0, 100)
+        // Render remaining fields except type, ts, and known fields
+        const rest2 = Object.entries(ev!).filter(([k]) => !["type", "ts", "gate", "tool", "duration"].includes(k))
+        const { value, originalLength } = truncate(rest2.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(" "), 60)
+        detail = `${value}${originalLength > 60 ? ` [${originalLength} chars]` : ""}`
       }
-      console.log(`${time.padEnd(10)} ${type.padEnd(20)} ${detail}`)
+
+      const line = [
+        timestamp.padEnd(28),
+        colorize(type, type.padEnd(15)),
+        gate.padEnd(20),
+        tool.padEnd(15),
+        duration,
+        detail,
+      ].join(" ")
+      console.log(line)
     }
-    console.log("─".repeat(80))
+    console.log("─".repeat(100))
     console.log()
     return
   }
@@ -226,7 +254,7 @@ const runLogs = async (runId?: string) => {
     const tin = complete ? Number(complete.total_input_tokens) || 0 : 0
     const tout = complete ? Number(complete.total_output_tokens) || 0 : 0
     const id = file.replace(".jsonl", "")
-    const prompt = start.prompt.slice(0, 50).replace(/\n/g, " ")
+    const { value: prompt } = truncate(start.prompt, 50)
     rows.push({ ts: start.ts, id, tin, tout, prompt })
   }
 

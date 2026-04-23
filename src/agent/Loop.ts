@@ -140,6 +140,8 @@ export const run = (
           const rawMessages = yield* Ref.get(messagesRef)
           const messages = elideStaleReads(rawMessages)
 
+          // Measure llm_request duration
+          const reqStart = performance.now()
           yield* persistence.record(runId, {
             type: "llm_request",
             messages,

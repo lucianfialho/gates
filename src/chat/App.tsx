@@ -50,7 +50,8 @@ export const App = ({ runEffect, systemPrompt }: {
   const renderer = useRenderer()
   const [input, setInput]   = useState("")
   const [msgs, setMsgs]     = useState<Msg[]>([])
-  const [liveText, setLive] = useState("")
+  const [liveLines, setLiveLines] = useState<Array<{ icon: string; text: string; dim: boolean }>>([])
+  const MAX_LIVE = 5
   const [status, setStatus] = useState<"idle" | "thinking" | "hitl">("idle")
   const [hitl, setHitl]     = useState<{ state: string; output: unknown; isError: boolean; resolve: (v: boolean) => void } | null>(null)
   const idRef               = useRef(0)
@@ -77,29 +78,31 @@ export const App = ({ runEffect, systemPrompt }: {
     const intent = classifyIntent(value.trim())
     setMsgs(prev => [...prev, { id: String(++idRef.current), role: "user", text: value.trim(), tools: [] }])
     setStatus("thinking")
-    setLive("thinking…")
+    setLiveLines([{ icon: "⟳", text: "thinking…", dim: true }])
     setInput("")
 
     const tools: Array<{ text: string; isGate: boolean }> = []
 
-    // Strip <think>...</think> blocks from MiniMax reasoning output
     const stripThinking = (text: string) =>
       text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
 
+    const addLive = (icon: string, text: string, dim = false) =>
+      setLiveLines(prev => [...prev.slice(-(MAX_LIVE - 1)), { icon, text, dim }])
+
     const onEvent = (ev: ChatEvent) => {
       if (ev.type === "thinking") {
-        // Show first 80 chars of intermediate reasoning
-        setLive(ev.text.slice(0, 80).replace(/\n/g, " "))
+        const cleaned = stripThinking(ev.text).slice(0, 100).replace(/\n/g, " ")
+        if (cleaned) addLive("…", cleaned, true)
       }
       if (ev.type === "tool_call") {
         const s = toolSummary(ev.name, ev.input)
         tools.push({ text: s, isGate: false })
-        setLive(`⚙ ${s}`)
+        addLive("⚙", s)
       }
       if (ev.type === "gate_block") {
         const s = `gate:${ev.gate}  ${ev.reason}`
         tools.push({ text: s, isGate: true })
-        setLive(`⛔ ${s}`)
+        addLive("⛔", s)
       }
     }
 
@@ -131,7 +134,7 @@ export const App = ({ runEffect, systemPrompt }: {
       }])
     }
 
-    setLive("")
+    setLiveLines([])
     setStatus("idle")
   }, [status, runEffect, systemPrompt, chatHITL])
 
@@ -182,11 +185,19 @@ export const App = ({ runEffect, systemPrompt }: {
           </box>
         ))}
 
-        {/* live progress indicator */}
-        {status === "thinking" && liveText && (
-          <box flexDirection="row" gap={1}>
-            <text fg="#888800">⟳</text>
-            <text fg="#555555">{liveText}</text>
+        {/* live progress — rolling stream of thinking + tool calls */}
+        {status === "thinking" && liveLines.length > 0 && (
+          <box flexDirection="column">
+            {liveLines.map((line, i) => (
+              <box key={i} flexDirection="row" gap={1}>
+                <text fg={line.icon === "⛔" ? "#FF4444" : line.dim ? "#444444" : "#888800"}>
+                  {line.icon}
+                </text>
+                <text fg={line.icon === "⛔" ? "#FF6666" : line.dim ? "#444444" : "#666666"}>
+                  {line.text}
+                </text>
+              </box>
+            ))}
           </box>
         )}
       </scrollbox>

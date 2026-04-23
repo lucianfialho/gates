@@ -92,16 +92,6 @@ export const runSkill = (
 
       const fullPrompt = statePrompt + schemaInstructions
 
-      yield* persistence.record(runId, {
-        type: "llm_request",
-        messages: [{ role: "user" as const, content: `[state: ${currentState}] ${fullPrompt}` }],
-        ts: new Date().toISOString(),
-      })
-
-      type AgentOutcome =
-        | { ok: true; text: string; usage: { input_tokens: number; output_tokens: number } }
-        | { ok: false; action: "retry" | "skip"; error: RunnerError }
-
       // Inject project context — filter to files identified by analyze if available
       const analyzeFiles = (outputs["analyze"]?.output as Record<string, unknown>)?.files
       const filterFiles = Array.isArray(analyzeFiles) ? analyzeFiles as string[] : undefined
@@ -113,6 +103,18 @@ export const runSkill = (
       if (verbose) {
         console.error(`[gates] state prompt: ${fullPrompt.slice(0, 200)}`)
       }
+
+      type AgentOutcome =
+        | { ok: true; text: string; usage: { input_tokens: number; output_tokens: number } }
+        | { ok: false; action: "retry" | "skip"; error: RunnerError }
+
+      // Measure llm_request duration
+      const reqStart = performance.now()
+      yield* persistence.record(runId, {
+        type: "llm_request",
+        messages: [{ role: "user" as const, content: `[state: ${currentState}] ${fullPrompt}` }],
+        ts: new Date().toISOString(),
+      })
 
       // Apply per-state timeout if configured
       const agentEffect = stateDef.timeout_ms
