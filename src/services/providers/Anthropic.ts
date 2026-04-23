@@ -2,7 +2,7 @@ import { Effect } from "effect"
 import Anthropic from "@anthropic-ai/sdk"
 import type { LLMShape, LLMError, Message, ToolDef, LLMResponse } from "../LLM.js"
 
-const MODEL = process.env.GATES_MODEL ?? "claude-sonnet-4-6"
+const MODEL = () => process.env.GATES_MODEL ?? "claude-sonnet-4-6"
 
 export const makeAnthropicProvider = (apiKey: string): LLMShape => {
   const client = new Anthropic({ apiKey })
@@ -15,7 +15,7 @@ export const makeAnthropicProvider = (apiKey: string): LLMShape => {
     Effect.tryPromise({
       try: () =>
         client.messages.create({
-          model: MODEL,
+          model: MODEL(),
           max_tokens: 8096,
           ...(system ? { system } : {}),
           tools: tools.map((t) => ({

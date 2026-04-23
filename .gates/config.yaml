@@ -4,6 +4,19 @@ project:
   name: gates
   stack: [typescript, bun, effect-v4, anthropic-sdk]
 
+# Active provider and model (no API keys here — use: gates auth set <provider> <key>)
+provider: anthropic
+model: claude-sonnet-4-6
+
+# Provider declarations — only base_url, no secrets
+providers:
+  anthropic: {}
+  openai: {}
+  minimax:
+    base_url: https://api.minimax.io/anthropic/v1
+  ollama:
+    base_url: http://localhost:11434/v1
+
 indexed_directories:
   - path: src/agent
     specialist: agent-loop

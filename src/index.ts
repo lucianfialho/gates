@@ -43,29 +43,44 @@ const loadContext = async (): Promise<string | undefined> => {
 const runAuth = (args: string[]) =>
   Effect.gen(function* () {
     const auth = yield* Auth
-    const [sub, value] = args
+    const [sub, second, third] = args
 
     if (sub === "set") {
-      if (!value) { console.error("Usage: gates auth set <api-key>"); process.exit(1) }
-      yield* auth.setApiKey(value)
-      console.log("API key saved to ~/.local/share/gates/auth.json")
+      // gates auth set <key>               → anthropic (default)
+      // gates auth set <provider> <key>    → named provider
+      const [provider, key] = third ? [second!, third] : ["anthropic", second!]
+      if (!key) {
+        console.error("Usage:\n  gates auth set <key>\n  gates auth set <provider> <key>")
+        process.exit(1)
+      }
+      yield* auth.setApiKey(key, provider)
+      console.log(`API key saved for "${provider}" in ~/.local/share/gates/auth.json`)
       return
     }
 
     if (sub === "show") {
-      const key = yield* auth.getApiKey()
-      if (!key) { console.log("No API key stored. Run: gates auth set sk-ant-..."); return }
-      console.log(`API key: ${key.slice(0, 12)}...${key.slice(-4)}`)
+      const keys = yield* auth.listKeys()
+      const entries = Object.entries(keys)
+      if (!entries.length) {
+        console.log("No API keys stored.\n  Run: gates auth set <key>")
+        return
+      }
+      console.log("\nStored API keys:")
+      for (const [p, k] of entries) console.log(`  ${p.padEnd(12)} ${k}`)
+      console.log()
       return
     }
 
     if (sub === "remove") {
-      yield* auth.removeApiKey()
-      console.log("API key removed.")
+      // gates auth remove             → anthropic
+      // gates auth remove <provider>  → named provider
+      const provider = second ?? "anthropic"
+      yield* auth.removeApiKey(provider)
+      console.log(`API key removed for "${provider}".`)
       return
     }
 
-    console.log("Usage:\n  gates auth set <key>\n  gates auth show\n  gates auth remove")
+    console.log("Usage:\n  gates auth set <key>\n  gates auth set <provider> <key>\n  gates auth show\n  gates auth remove [provider]")
   }).pipe(Effect.provide(AuthLayer))
 
 const runAgent = async (prompt: string, verbose?: boolean) => {

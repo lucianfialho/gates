@@ -3,7 +3,7 @@ import OpenAI from "openai"
 import type Anthropic from "@anthropic-ai/sdk"
 import type { LLMShape, LLMError, Message, ToolDef, LLMResponse } from "../LLM.js"
 
-const MODEL = process.env.GATES_MODEL ?? "gpt-4o-mini"
+const MODEL = () => process.env.GATES_MODEL ?? "gpt-4o-mini"
 
 // Convert our internal Message[] (Anthropic-style) to OpenAI message format
 const toOpenAIMessages = (messages: Message[]): OpenAI.ChatCompletionMessageParam[] => {
@@ -80,7 +80,7 @@ export const makeOpenAIProvider = (apiKey: string, baseURL?: string): LLMShape =
           : []
 
         const res = await client.chat.completions.create({
-          model: MODEL,
+          model: MODEL(),
           max_tokens: 8096,
           messages: [...systemMessages, ...toOpenAIMessages(messages)],
           ...(tools.length > 0 ? {

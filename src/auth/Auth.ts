@@ -5,16 +5,17 @@ import { homedir } from "node:os"
 
 const authPath = join(homedir(), ".local", "share", "gates", "auth.json")
 
-interface AuthFile {
-  anthropic?: { apiKey: string }
+export type ProviderName = "anthropic" | "openai" | "minimax" | string
+
+interface ProviderAuth {
+  apiKey: string
 }
+
+type AuthFile = Partial<Record<ProviderName, ProviderAuth>>
 
 const readAuthFile = (): Effect.Effect<AuthFile> =>
   Effect.tryPromise({
-    try: async () => {
-      const raw = await readFile(authPath, "utf-8")
-      return JSON.parse(raw) as AuthFile
-    },
+    try: async () => JSON.parse(await readFile(authPath, "utf-8")) as AuthFile,
     catch: () => ({} as AuthFile),
   }).pipe(Effect.orElseSucceed(() => ({} as AuthFile)))
 
@@ -28,32 +29,55 @@ const writeAuthFile = (data: AuthFile): Effect.Effect<void> =>
   }).pipe(Effect.orDie)
 
 export interface AuthShape {
-  readonly getApiKey: () => Effect.Effect<string | undefined>
-  readonly setApiKey: (key: string) => Effect.Effect<void>
-  readonly removeApiKey: () => Effect.Effect<void>
+  readonly getApiKey: (provider?: ProviderName) => Effect.Effect<string | undefined>
+  readonly setApiKey: (key: string, provider?: ProviderName) => Effect.Effect<void>
+  readonly removeApiKey: (provider?: ProviderName) => Effect.Effect<void>
+  readonly listKeys: () => Effect.Effect<Record<string, string>>
 }
 
 export class Auth extends Context.Service<Auth, AuthShape>()("gates/Auth") {}
 
+// env var precedence per provider
+const envKeyFor = (provider: ProviderName): string | undefined => {
+  if (provider === "anthropic") return process.env["ANTHROPIC_API_KEY"]
+  if (provider === "openai")    return process.env["OPENAI_API_KEY"]
+  return process.env["GATES_API_KEY"]
+}
+
 const makeImpl: Effect.Effect<AuthShape> = Effect.sync(() => ({
-  getApiKey: () =>
+  getApiKey: (provider: ProviderName = "anthropic") =>
     Effect.gen(function* () {
-      if (process.env["ANTHROPIC_API_KEY"]) return process.env["ANTHROPIC_API_KEY"]
+      const fromEnv = envKeyFor(provider)
+      if (fromEnv) return fromEnv
       const file = yield* readAuthFile()
-      return file.anthropic?.apiKey
+      return file[provider]?.apiKey
     }),
 
-  setApiKey: (key: string) =>
+  setApiKey: (key: string, provider: ProviderName = "anthropic") =>
     Effect.gen(function* () {
       const file = yield* readAuthFile()
-      yield* writeAuthFile({ ...file, anthropic: { apiKey: key } })
+      yield* writeAuthFile({ ...file, [provider]: { apiKey: key } })
     }),
 
-  removeApiKey: () =>
+  removeApiKey: (provider: ProviderName = "anthropic") =>
     Effect.gen(function* () {
       const file = yield* readAuthFile()
-      const { anthropic: _, ...rest } = file
-      yield* writeAuthFile(rest)
+      const updated = { ...file }
+      delete updated[provider]
+      yield* writeAuthFile(updated)
+    }),
+
+  listKeys: () =>
+    Effect.gen(function* () {
+      const file = yield* readAuthFile()
+      const result: Record<string, string> = {}
+      for (const [p, v] of Object.entries(file)) {
+        if (v?.apiKey) {
+          const k = v.apiKey
+          result[p] = `${k.slice(0, 10)}...${k.slice(-4)}`
+        }
+      }
+      return result
     }),
 }))
 

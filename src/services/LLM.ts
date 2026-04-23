@@ -4,6 +4,7 @@ import type { ToolCall } from "../gates/Gate.js"
 import { Auth, AuthLayer } from "../auth/Auth.js"
 import { makeAnthropicProvider } from "./providers/Anthropic.js"
 import { makeOpenAIProvider } from "./providers/OpenAI.js"
+import { getProviderConfig } from "../config/GatesConfig.js"
 
 export class LLMError {
   readonly _tag = "LLMError" as const
@@ -40,40 +41,40 @@ export class LLMService extends Context.Service<LLMService, LLMShape>()(
   "gates/LLMService"
 ) {}
 
-// GATES_PROVIDER=anthropic (default) | openai | openai-compat
-// GATES_BASE_URL — override base URL for openai-compat providers (Ollama, MiniMax, etc.)
-// GATES_MODEL — override model name
+// Provider resolved from (in order): env vars → .gates/config.yaml → defaults
+// API keys resolved from: env vars → ~/.local/share/gates/auth.json
 
 const makeImpl: Effect.Effect<LLMShape, never, Auth> = Effect.gen(function* () {
   const auth = yield* Auth
-  const provider = process.env.GATES_PROVIDER ?? "anthropic"
+  const { provider, model, baseURL } = yield* Effect.promise(() => getProviderConfig())
+
+  process.env.GATES_MODEL = model  // make model available to providers
 
   if (provider === "anthropic") {
-    const apiKey = yield* auth.getApiKey()
+    const apiKey = yield* auth.getApiKey("anthropic")
     if (!apiKey) {
       console.error(
-        "\nNo API key found. Run: gates auth set sk-ant-...\n" +
-        "Or set ANTHROPIC_API_KEY env var.\n"
+        `\nNo Anthropic API key found.\n` +
+        `  Run: gates auth set sk-ant-...\n` +
+        `  Or:  ANTHROPIC_API_KEY=sk-ant-... gates <command>\n`
       )
       process.exit(1)
     }
     return makeAnthropicProvider(apiKey)
   }
 
-  // openai or openai-compat (Ollama, MiniMax, etc.)
-  const apiKey = process.env.OPENAI_API_KEY ?? process.env.GATES_API_KEY ?? "ollama"
-  const baseURL = process.env.GATES_BASE_URL  // e.g. http://localhost:11434/v1 for Ollama
-
-  if (!apiKey || apiKey === "ollama" && !baseURL) {
-    if (provider !== "openai") {
-      console.error("\nSet GATES_BASE_URL for local providers (e.g. http://localhost:11434/v1)\n")
-    } else {
-      console.error("\nSet OPENAI_API_KEY env var.\n")
-      process.exit(1)
-    }
+  // openai-compatible: openai, minimax, ollama, etc.
+  const apiKey = yield* auth.getApiKey(provider)
+  if (!apiKey && provider !== "ollama") {
+    console.error(
+      `\nNo API key found for provider "${provider}".\n` +
+      `  Run: gates auth set ${provider} <key>\n` +
+      `  Or:  GATES_API_KEY=<key> gates <command>\n`
+    )
+    process.exit(1)
   }
 
-  return makeOpenAIProvider(apiKey, baseURL)
+  return makeOpenAIProvider(apiKey ?? "ollama", baseURL)
 })
 
 export const LLMLayer = Layer.effect(LLMService)(makeImpl).pipe(
