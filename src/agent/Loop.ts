@@ -16,47 +16,54 @@ const now = () => new Date().toISOString()
 
 // Replace stale file-read results with a placeholder so they don't
 // accumulate in the message history across many tool-call rounds.
-// Tracks tool calls that produced large content — elided after staleAfterTurns
-const elideStaleReads = (messages: Message[], staleAfterTurns = 1): Message[] => {
+// Elide older duplicate reads — keeps only the LATEST read of each path+range.
+// Agent only sees [cached] when it already re-read that range later, so it
+// has no reason to re-read again.
+const elideStaleReads = (messages: Message[]): Message[] => {
+  // Build label map: tool_id → human-readable label
   const toolLabels = new Map<string, string>()
-  for (const msg of messages) {
-    if (msg.role === "assistant") {
-      for (const block of msg.content) {
-        if (block.type !== "tool_use") continue
-        const input = block.input as Record<string, unknown>
-        if (block.name === "read" || block.name === "read_lines") {
-          const range = input["start"] != null ? `:${input["start"]}-${input["end"]}` : ""
-          toolLabels.set(block.id, `${block.name}(${input["path"] ?? "?"}${range})`)
-        } else if (block.name === "grep") {
-          toolLabels.set(block.id, `grep("${input["pattern"]}", ${input["path"]})`)
-        }
-      }
-    }
-  }
+  // Track which turn each tool_id was called in
+  const idToTurn = new Map<string, number>()
+  // Track the latest turn each label appears in
+  const latestTurnForLabel = new Map<string, number>()
 
   let turn = 0
-  const assistantTurn = new Map<number, number>()
-  messages.forEach((msg, i) => {
-    if (msg.role === "assistant") assistantTurn.set(i, turn++)
-  })
-  const currentTurn = turn
-
-  return messages.map((msg, i) => {
-    if (msg.role !== "tool") return msg
-    let prevTurn = -1
-    for (let j = i - 1; j >= 0; j--) {
-      const t = assistantTurn.get(j)
-      if (t !== undefined) { prevTurn = t; break }
+  for (const msg of messages) {
+    if (msg.role !== "assistant") continue
+    for (const block of msg.content) {
+      if (block.type !== "tool_use") continue
+      const input = block.input as Record<string, unknown>
+      let label: string | null = null
+      if (block.name === "read" || block.name === "read_lines") {
+        const range = input["start"] != null ? `:${input["start"]}-${input["end"]}` : ""
+        label = `${block.name}(${input["path"] ?? "?"}${range})`
+      } else if (block.name === "grep") {
+        label = `grep("${input["pattern"]}", ${input["path"]})`
+      }
+      if (label) {
+        toolLabels.set(block.id, label)
+        idToTurn.set(block.id, turn)
+        const prev = latestTurnForLabel.get(label) ?? -1
+        if (turn > prev) latestTurnForLabel.set(label, turn)
+      }
     }
-    const turnsAgo = currentTurn - prevTurn - 1
-    if (turnsAgo < staleAfterTurns) return msg
+    turn++
+  }
+
+  return messages.map((msg) => {
+    if (msg.role !== "tool") return msg
     return {
       ...msg,
       results: msg.results.map((r) => {
         const label = toolLabels.get(r.id)
-        return label
-          ? { id: r.id, content: `[cached: ${label} — call again if needed]` }
-          : r
+        if (!label) return r
+        const myTurn = idToTurn.get(r.id) ?? -1
+        const latestTurn = latestTurnForLabel.get(label) ?? -1
+        // Only elide if this same label was read again in a LATER turn
+        if (myTurn < latestTurn) {
+          return { id: r.id, content: `[duplicate: ${label} — use the later result]` }
+        }
+        return r
       }),
     }
   })
