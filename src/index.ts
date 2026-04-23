@@ -129,9 +129,97 @@ const runStats = async () => {
   console.log()
 }
 
+const runLogs = async (runId?: string) => {
+  const runsDir = join(process.cwd(), ".gates", "runs")
+  let files: string[]
+  try {
+    files = (await readdir(runsDir)).filter((f) => f.endsWith(".jsonl"))
+  } catch {
+    console.log("No runs yet. Run: gates <prompt>")
+    return
+  }
+
+  if (runId) {
+    // Locate file by full id or prefix match
+    const match = files.find((f) => f === `${runId}.jsonl` || f.startsWith(runId))
+    if (!match) {
+      console.error(`No run found matching: ${runId}`)
+      process.exit(1)
+    }
+    const lines = (await readFile(join(runsDir, match), "utf-8")).split("\n").filter(Boolean)
+    const events = lines.map((l) => { try { return JSON.parse(l) as Record<string, unknown> } catch { return null } }).filter(Boolean)
+    console.log(`\nRun: ${match.replace(".jsonl", "")}`)
+    console.log("─".repeat(80))
+    for (const ev of events) {
+      const ts = typeof ev!.ts === "string" ? ev!.ts as string : ""
+      const time = ts.length >= 19 ? ts.slice(11, 19) : ts
+      const type = String(ev!.type ?? "unknown")
+      let detail = ""
+      if (type === "run_start") {
+        const prompt = String(ev!.prompt ?? "").slice(0, 60).replace(/\n/g, " ")
+        detail = `prompt="${prompt}${String(ev!.prompt ?? "").length > 60 ? "…" : ""}"`
+      } else if (type === "run_complete") {
+        detail = `input_tokens=${ev!.total_input_tokens} output_tokens=${ev!.total_output_tokens}`
+      } else if (type === "llm_response") {
+        detail = `stop_reason=${ev!.stop_reason} input_tokens=${ev!.input_tokens} output_tokens=${ev!.output_tokens}`
+      } else if (type === "tool_call") {
+        detail = `tool=${ev!.tool} id=${ev!.tool_use_id}`
+      } else if (type === "tool_result") {
+        detail = `tool=${ev!.tool} id=${ev!.tool_use_id}`
+      } else if (type === "gate_block") {
+        detail = `gate=${ev!.gate} reason=${ev!.reason}`
+      } else if (type === "gate_pass") {
+        detail = `gate=${ev!.gate}`
+      } else {
+        // Render remaining fields except type and ts
+        const rest2 = Object.entries(ev!).filter(([k]) => k !== "type" && k !== "ts")
+        detail = rest2.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(" ").slice(0, 100)
+      }
+      console.log(`${time.padEnd(10)} ${type.padEnd(20)} ${detail}`)
+    }
+    console.log("─".repeat(80))
+    console.log()
+    return
+  }
+
+  // List mode — last 10 runs
+  type RunRow = { ts: string; id: string; tin: number; tout: number; prompt: string }
+  const rows: RunRow[] = []
+
+  for (const file of files) {
+    const lines = (await readFile(join(runsDir, file), "utf-8")).split("\n").filter(Boolean)
+    const parsed = lines.map((l) => { try { return JSON.parse(l) as Record<string, unknown> } catch { return null } }).filter(Boolean)
+    const start = parsed.find((e) => e!.type === "run_start") as { prompt: string; ts: string } | undefined
+    const complete = parsed.find((e) => e!.type === "run_complete") as { total_input_tokens: number; total_output_tokens: number } | undefined
+    if (!start) continue
+    const tin = complete ? Number(complete.total_input_tokens) || 0 : 0
+    const tout = complete ? Number(complete.total_output_tokens) || 0 : 0
+    const id = file.replace(".jsonl", "")
+    const prompt = start.prompt.slice(0, 50).replace(/\n/g, " ")
+    rows.push({ ts: start.ts, id, tin, tout, prompt })
+  }
+
+  rows.sort((a, b) => b.ts.localeCompare(a.ts))
+  const recent = rows.slice(0, 10)
+
+  console.log(`\n${"id".padEnd(10)} ${"date".padEnd(12)} ${"in tok".padStart(8)} ${"out tok".padStart(8)}  prompt`)
+  console.log("─".repeat(90))
+  for (const r of recent) {
+    const date = r.ts.slice(0, 16).replace("T", " ")
+    console.log(`${r.id.slice(0, 8).padEnd(10)} ${date.padEnd(12)} ${String(r.tin).padStart(8)} ${String(r.tout).padStart(8)}  ${r.prompt}`)
+  }
+  console.log("─".repeat(90))
+  console.log()
+}
+
 const main = async () => {
   if (cmd === "stats") {
     await runStats()
+    return
+  }
+
+  if (cmd === "logs") {
+    await runLogs(rest[0])
     return
   }
 
@@ -209,6 +297,8 @@ USAGE
   gates [--verbose] <skill> "<description>"         run a skill (shortcut)
   gates [--verbose] run <skill.yaml> [key=value .]  run a skill by path
   gates stats                                       show token usage and cost per run
+  gates logs                                        list last 10 runs
+  gates logs <runId>                                show timeline for a specific run
   gates auth set <key>                              save Anthropic API key
   gates auth show                                   show stored key (masked)
   gates auth remove                                 delete stored key
