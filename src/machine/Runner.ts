@@ -11,6 +11,7 @@ import { AgentError } from "../agent/Loop.js"
 import { GateError } from "../gates/Gate.js"
 import { buildContextPrompt, updateContextFile } from "../context/ProjectContext.js"
 import { writeRelevantPaths } from "../context/RelevantPaths.js"
+import { buildResearchContext, formatResearchContext } from "../context/ResearchContext.js"
 import { validate } from "./schema_validate.js"
 
 export class RunnerError {
@@ -93,13 +94,24 @@ export const runSkill = (
 
       const fullPrompt = statePrompt + schemaInstructions
 
+      // For research state: pre-load metadata summaries + GitHub issues via Effect pipeline
+      // This replaces LLM tool calls with deterministic data — zero tokens for discovery
+      let researchInjection = ""
+      if (currentState === "research") {
+        const rawIssue = inputs["issue"] ?? ""
+        const researchCtx = yield* buildResearchContext(rawIssue)
+        researchInjection = formatResearchContext(researchCtx)
+        console.error(`[gates] research context: ${researchCtx.summaries.length} summaries, ${researchCtx.related.length} related issues`)
+      }
+
       // Inject project context — filter to files identified by analyze if available
       const analyzeFiles = (outputs["analyze"]?.output as Record<string, unknown>)?.files
       const filterFiles = Array.isArray(analyzeFiles) ? analyzeFiles as string[] : undefined
       const contextSnippet = yield* Effect.promise(() => buildContextPrompt(filterFiles))
-      const stateSystem = contextSnippet
-        ? `${systemContext ?? ""}\n\n${contextSnippet}`.trim()
-        : systemContext
+      const stateSystem = [systemContext, contextSnippet, researchInjection]
+        .filter(Boolean)
+        .join("\n\n")
+        .trim() || undefined
 
       if (verbose) {
         console.error(`[gates] state prompt: ${fullPrompt.slice(0, 200)}`)

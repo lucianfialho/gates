@@ -67,22 +67,22 @@ states:
       Do NOT read full source files — only summaries.
       GATE: relevant_dirs and likely_files confirmed from metadata.
     agent_prompt: |
-      You are researching a codebase using its metadata index.
+      You are synthesizing a research context for an issue.
 
       Issue: {{inputs.issue}}
 
-      Steps you MUST follow:
-      1. Read .gates/config.yaml to find the indexed_directories list
-      2. For each indexed directory, read <dir>/.metadata/summary.yaml
-      3. Match the issue description against the title, covers, and specialist fields
-      4. Identify which directories are relevant — and which are NOT
-      5. From the covers field of relevant directories, identify likely_files
+      The metadata index and related issues are already loaded in your system prompt.
+      Do NOT make tool calls to read files — the context is pre-loaded for you.
 
-      IMPORTANT: Do NOT read full source files. Summaries only.
-      The goal is to scope the work before spending tokens on actual code.
+      Your job:
+      1. Read the "Project metadata" section in the system prompt
+      2. Match the issue to relevant directories based on title/covers/specialist
+      3. From the covers of relevant dirs, identify likely_files
+      4. Read the "Related issues" section for lessons from past work
+      5. Identify what is explicitly OUT OF SCOPE
 
-      GATE CONDITION: you must have read at least 2 .metadata/summary.yaml files
-      before responding. Output must list specific files from covers fields.
+      GATE CONDITION: your output must reference specific files from the
+      covers fields in the metadata section. Do not invent paths.
 
       Respond with a JSON code block:
       ```json
