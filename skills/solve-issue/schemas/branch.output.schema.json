@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "required": ["branch", "created"],
+  "properties": {
+    "branch": { "type": "string" },
+    "created": { "type": "boolean" }
+  }
+}

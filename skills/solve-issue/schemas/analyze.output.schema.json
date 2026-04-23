@@ -1,10 +1,12 @@
 {
   "type": "object",
-  "required": ["summary", "files", "plan", "complexity"],
+  "required": ["issue_title", "summary", "files", "plan", "complexity"],
   "properties": {
+    "issue_title": { "type": "string" },
     "summary": { "type": "string" },
     "files": { "type": "array", "items": { "type": "string" } },
     "plan": { "type": "array", "items": { "type": "string" } },
-    "complexity": { "type": "string", "enum": ["low", "medium", "high"] }
+    "complexity": { "type": "string", "enum": ["low", "medium", "high"] },
+    "issue_number": {}
   }
 }
