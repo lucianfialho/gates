@@ -29,10 +29,14 @@ states:
 
       Request: {{inputs.issue}}
 
+      Recent conversation context (if any):
+      {{inputs.chat_context}}
+
       Rules:
-      - If this is a GitHub issue number, it is ready (the issue has all context).
-      - If this is a text description, check: does it name specific files or behavior?
-        Is the expected outcome clear? Is there enough to write a test for it?
+      - If this is a GitHub issue number → ready: true immediately.
+      - If chat_context above mentions specific files, root causes, or expected behavior → ready: true.
+      - If the request alone names specific files or clear behavior → ready: true.
+      - Only return ready: false if you genuinely cannot determine what to implement.
       - Do NOT start implementing — only assess clarity.
 
       Respond with a JSON code block:
