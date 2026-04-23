@@ -16,6 +16,7 @@ import { runSkill } from "./machine/Runner.js"
 import { simulate } from "./machine/Simulate.js"
 import { updateContextFile } from "./context/ProjectContext.js"
 import { startChat } from "./chat/index.js"
+import { GatewayService, GatewayServiceLive } from "./machine/Gateway.js"
 
 const rawArgs = process.argv.slice(2)
 const verbose = rawArgs.includes("--verbose")
@@ -27,7 +28,8 @@ const AppLayer = Layer.mergeAll(
   GateRegistryLayer,
   ToolRegistryLayer,
   PersistenceLayer,
-  BuiltinGatesLayer.pipe(Layer.provide(GateRegistryLayer))
+  BuiltinGatesLayer.pipe(Layer.provide(GateRegistryLayer)),
+  GatewayServiceLive.pipe(Layer.provide(LLMLayer))
 )
 
 const loadContext = async (): Promise<string | undefined> => {
@@ -433,7 +435,81 @@ EXAMPLES
     process.exit(prompt ? 0 : 1)
   }
 
-  await Effect.runPromise(await (runAgent(prompt, verbose) as any))
+  // Gateway: classify intent → route to the right execution mode
+  const systemPrompt = await loadContext()
+  const skillsDir = join(__dirname, "..", "skills")
+  const defaultSkill = join(skillsDir, "solve-issue", "skill.yaml")
+  const hasDefaultSkill = await access(defaultSkill).then(() => true).catch(() => false)
+
+  const gatewayEffect = Effect.gen(function* () {
+    const gateway = yield* GatewayService
+    const decision = yield* gateway.classify(prompt)
+
+    console.error(`[gateway] mode=${decision.mode} intent="${decision.intent.slice(0, 60)}"`)
+
+    switch (decision.mode) {
+      case "ProRN":
+      case "LEARN": {
+        // Read-only Q&A or docs — direct agent, no PR, no skill overhead
+        const learnSystem = decision.mode === "LEARN"
+          ? `${systemPrompt ?? ""}\n\nMode: LEARN. You are generating documentation or explanations only. Do not modify implementation files.`
+          : systemPrompt
+        const result = yield* run(decision.intent, learnSystem, undefined, verbose)
+        console.log(result.text || "(no output)")
+        yield* Effect.promise(() => updateContextFile())
+        break
+      }
+
+      case "PATCH": {
+        // Minor change — skip clarify+research, go straight to analyze
+        if (hasDefaultSkill) {
+          yield* runSkill(
+            resolve(defaultSkill),
+            { issue: decision.intent, chat_context: "PATCH mode: skip clarify and research, go directly to analyze" },
+            systemPrompt,
+            verbose,
+            cliHITL
+          ).pipe(
+            Effect.tap((results) => Effect.sync(() => {
+              const last = Object.values(results).at(-1)
+              if (last) console.log(JSON.stringify(last.output, null, 2))
+            }))
+          )
+        } else {
+          const result = yield* run(decision.intent, systemPrompt, undefined, verbose)
+          console.log(result.text || "(no output)")
+          yield* Effect.promise(() => updateContextFile())
+        }
+        break
+      }
+
+      case "STANDARD":
+      default: {
+        // Full lifecycle — skill if available, raw agent otherwise
+        if (hasDefaultSkill) {
+          yield* runSkill(
+            resolve(defaultSkill),
+            { issue: decision.intent },
+            systemPrompt,
+            verbose,
+            cliHITL
+          ).pipe(
+            Effect.tap((results) => Effect.sync(() => {
+              const last = Object.values(results).at(-1)
+              if (last) console.log(JSON.stringify(last.output, null, 2))
+            }))
+          )
+        } else {
+          const result = yield* run(decision.intent, systemPrompt, undefined, verbose)
+          console.log(result.text || "(no output)")
+          yield* Effect.promise(() => updateContextFile())
+        }
+        break
+      }
+    }
+  }).pipe(Effect.provide(AppLayer))
+
+  await Effect.runPromise(gatewayEffect as any)
 }
 
 main().catch((e) => {
