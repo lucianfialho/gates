@@ -211,6 +211,7 @@ All layers are Effect V4 services. Dependency injection via `Context.Service` + 
 ## References
 
 - [Rules and Gates](https://blog.fsck.com/2026/04/07/rules-and-gates/) — Jesse Vincent's thesis that this harness implements
+- [java-harness-agent](https://github.com/listener-He/java-harness-agent) — architecture inspiration: their gateway + lifecycle diagram unlocked our own design, though we went further with Effect's typed error channels and the read-large/read-dedup gates
 - [atomic-gates](https://github.com/lucianfialho/atomic-gates) — the Claude Code plugin this project grew out of
 - [effect](https://github.com/Effect-TS/effect) — the TypeScript runtime powering the agent loop
 - [MemGPT](https://arxiv.org/abs/2310.08560) — the memory hierarchy concept behind read-large + read-dedup
