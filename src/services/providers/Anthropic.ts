@@ -25,7 +25,7 @@ export const makeAnthropicProvider = (apiKey: string): LLMShape => {
   ): Effect.Effect<LLMResponse, LLMError> =>
     Effect.gen(function* () {
       const systemParam = system
-        ? ([{ type: "text" as const, text: system, cache_control: { type: "ephemeral" as const } }] as const)
+        ? [{ type: "text" as const, text: system, cache_control: { type: "ephemeral" as const } }]
         : undefined
 
       const apiMessages: Anthropic.MessageParam[] = messages.map((m) => {
@@ -70,7 +70,7 @@ export const makeAnthropicProvider = (apiKey: string): LLMShape => {
             try: () => client.messages.create({
               model: MODEL(),
               max_tokens: 8096,
-              system: system,
+              system: systemParam,
               tools: apiTools,
               messages: apiMessages,
             } as Parameters<typeof client.messages.create>[0]).then((r) => r as unknown as Anthropic.Message),
