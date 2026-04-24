@@ -11,6 +11,8 @@ USAGE
   gates stats --json                                JSON output
   gates logs                                        list last 10 runs
   gates logs <runId>                                full event timeline for a run
+  gates clean                                       remove old runs, keep last 20
+  gates clean --keep <n>                            keep last n runs (0 = remove all)
   gates resume <run-id>                             resume a failed skill run
   gates auth set <key>                              save API key
   gates auth show                                   show stored key (masked)

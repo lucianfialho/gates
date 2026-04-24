@@ -1,6 +1,4 @@
 [
-  "src/cli/args.ts",
-  "src/cli/usage.ts",
-  "src/commands/auth.ts",
-  "package.json"
+  "src/commands/clean.ts",
+  "src/cli/args.ts"
 ]

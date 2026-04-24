@@ -7,6 +7,7 @@ import { join } from "node:path"
 import { runAuth } from "../commands/auth.js"
 import { runStats } from "../commands/stats.js"
 import { runLogs } from "../commands/logs.js"
+import { runClean } from "../commands/clean.js"
 import { runResume } from "../commands/resume.js"
 import { runSkillShortcut, runSkillByPath } from "../commands/skill.js"
 import { runGateway } from "../commands/gateway.js"
@@ -34,6 +35,12 @@ export async function routeCommand() {
       const [first] = rest
       const runId = /^[a-f0-9-]{8,}/i.test(first ?? "") ? first : undefined
       await runLogs(runId)
+      break
+    }
+
+    case "clean": {
+      const keepArg = rest[0] === "--keep" ? rest[1] : undefined
+      await runClean(keepArg)
       break
     }
 
