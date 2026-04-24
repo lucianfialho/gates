@@ -191,6 +191,8 @@ export const runSkill = (
     let totalOutput = 0
     let retryCount = 0
     let stateTokensTotal = 0   // cumulative tokens for the current state
+    let roundsWithoutWrite = 0  // consecutive rounds with no write/edit/mode_switch
+    const STUCK_THRESHOLD = 8   // rounds before suggesting mode_switch
 
     const nonTerminalStates = Object.entries(skill.states)
       .filter(([, s]) => !s.terminal).length
@@ -203,9 +205,10 @@ export const runSkill = (
 
       if (stateDef.terminal) break
 
-      // Reset read-dedup history and per-state token counter
+      // Reset read-dedup history, token counter, and stuck counter on state change
       clearReadHistory()
       stateTokensTotal = 0
+      roundsWithoutWrite = 0
 
       // Expose current state to gates (e.g. VerifyReadOnly blocks writes in verify)
       process.env["GATES_ACTIVE_STATE"] = currentState
@@ -247,13 +250,31 @@ export const runSkill = (
       const rawFiles = prpFiles ?? legacyFiles ?? researchFiles
       const filterFiles = Array.isArray(rawFiles) ? rawFiles as string[] : undefined
       const contextSnippet = yield* Effect.promise(() => buildContextPrompt(filterFiles))
-      const stateSystem = [systemContext, contextSnippet, researchInjection]
+      // Stuck hint — injected when agent hasn't written anything in STUCK_THRESHOLD rounds
+      const stuckHint = roundsWithoutWrite >= STUCK_THRESHOLD
+        ? `\n\n⚠ STUCK NOTICE: You've been reading/analyzing for ${roundsWithoutWrite} rounds without any writes or edits.\nIf the current approach isn't working, call mode_switch(mode, reason) to signal a mode change.\nAvailable: PATCH (targeted edit), STANDARD (full lifecycle), REFACTOR (decompose large files), ProRN (read-only explanation).`
+        : ""
+
+      // React to mode_switch calls from previous round
+      const activeMode = process.env["GATES_ACTIVE_MODE"]
+      const MODE_HINTS: Record<string, string> = {
+        PATCH: "\nMode: PATCH — make the smallest targeted edit possible. Use edit() not write(). No new files.",
+        STANDARD: "\nMode: STANDARD — full lifecycle, proceed normally.",
+        REFACTOR: "\nMode: REFACTOR — decompose large files into modules < 150 lines. Use write() for new files.",
+        ProRN: "\nMode: READ-ONLY — explain only, do NOT edit, write, or commit any files.",
+        LEARN: "\nMode: LEARN — write documentation or explanations only.",
+      }
+      const modeHint = activeMode && MODE_HINTS[activeMode] ? MODE_HINTS[activeMode] : ""
+
+      const stateSystem = [systemContext, contextSnippet, researchInjection, modeHint + stuckHint]
         .filter(Boolean)
         .join("\n\n")
         .trim() || undefined
 
       if (verbose) {
         console.error(`[gates] state prompt: ${fullPrompt.slice(0, 200)}`)
+        if (stuckHint) console.error(`[gates] stuck hint injected (rounds=${roundsWithoutWrite})`)
+        if (modeHint) console.error(`[gates] mode hint injected: ${activeMode}`)
       }
 
       type AgentOutcome =
@@ -268,17 +289,29 @@ export const runSkill = (
         ts: new Date().toISOString(),
       })
 
+      // Track write/edit/mode_switch calls to detect stuck agent
+      let wroteThisRound = false
+      const trackingOnEvent = (ev: ChatEvent) => {
+        if (ev.type === "tool_call") {
+          const name = (ev as { type: "tool_call"; name: string }).name
+          if (name === "write" || name === "edit" || name === "mode_switch") {
+            wroteThisRound = true
+          }
+        }
+        onEvent?.(ev)
+      }
+
       // Apply per-state timeout if configured
       const agentEffect = stateDef.timeout_ms
         ? Effect.promise(() =>
             Promise.race([
-              Effect.runPromise(runAgent(fullPrompt, stateSystem, runId, verbose, onEvent) as Effect.Effect<{ text: string; usage: { input_tokens: number; output_tokens: number } }, never, never>),
+              Effect.runPromise(runAgent(fullPrompt, stateSystem, runId, verbose, trackingOnEvent) as Effect.Effect<{ text: string; usage: { input_tokens: number; output_tokens: number } }, never, never>),
               new Promise<never>((_, reject) =>
                 setTimeout(() => reject(new Error(`State "${currentState}" timed out after ${stateDef.timeout_ms}ms`)), stateDef.timeout_ms!)
               ),
             ])
           ).pipe(Effect.mapError((e) => new RunnerError(`Timeout in state ${currentState}`, e)))
-        : runAgent(fullPrompt, stateSystem, runId, verbose, onEvent).pipe(
+        : runAgent(fullPrompt, stateSystem, runId, verbose, trackingOnEvent).pipe(
             Effect.mapError((e): RunnerError => e instanceof RunnerError ? e : new RunnerError(`Agent failed in state ${currentState}`, e))
           )
 
@@ -350,6 +383,17 @@ export const runSkill = (
       totalInput += usage.input_tokens
       totalOutput += usage.output_tokens
       stateTokensTotal += usage.input_tokens + usage.output_tokens
+
+      // Update stuck counter based on whether agent wrote anything
+      if (wroteThisRound) {
+        roundsWithoutWrite = 0
+        console.error(`[gates] ✓ write detected — stuck counter reset`)
+      } else {
+        roundsWithoutWrite++
+        if (roundsWithoutWrite >= STUCK_THRESHOLD) {
+          console.error(`[gates] ⚠ stuck: ${roundsWithoutWrite} rounds without writes — mode_switch hint injected`)
+        }
+      }
 
       // Budget gate — enforce cumulative token limit for this state
       if (stateDef.budget_tokens) {

@@ -234,6 +234,24 @@ const gh_pr_create: ToolHandler = (id, input) =>
     catch: (e) => new ToolError("gh_pr_create", e),
   })
 
+// Mode switch — agent signals intent to change execution mode.
+// Sets GATES_ACTIVE_MODE env var; Runner injects updated system prompt on next round.
+const VALID_MODES = ["ProRN", "LEARN", "PATCH", "STANDARD", "REFACTOR"] as const
+const mode_switch: ToolHandler = (id, input) =>
+  Effect.tryPromise({
+    try: async () => {
+      const { mode, reason } = input as { mode: string; reason?: string }
+      if (!VALID_MODES.includes(mode as (typeof VALID_MODES)[number])) {
+        return { id, content: `Invalid mode "${mode}". Valid modes: ${VALID_MODES.join(", ")}` }
+      }
+      process.env["GATES_ACTIVE_MODE"] = mode
+      const msg = reason ? `Mode switched to ${mode}: ${reason}` : `Mode switched to ${mode}`
+      console.error(`[mode_switch] ${msg}`)
+      return { id, content: msg }
+    },
+    catch: (e) => new ToolError("mode_switch", e),
+  })
+
 const handlers = new Map<string, ToolHandler>([
   ["bash", bash],
   ["read", read],
@@ -248,6 +266,7 @@ const handlers = new Map<string, ToolHandler>([
   ["gh_issue_list", gh_issue_list],
   ["gh_issue_create", gh_issue_create],
   ["gh_pr_create", gh_pr_create],
+  ["mode_switch", mode_switch],
 ])
 
 const definitions: ToolDef[] = [
@@ -419,6 +438,25 @@ const definitions: ToolDef[] = [
         base: { type: "string", description: "Base branch. Defaults to main." },
       },
       required: ["title", "body"],
+    },
+  },
+  {
+    name: "mode_switch",
+    description: "Switch the active execution mode when the current approach is not working. Call when stuck in reading loops, when a task is simpler/harder than expected, or when the context changes. The Runner will inject the new mode's system prompt on the next round.",
+    input_schema: {
+      type: "object",
+      properties: {
+        mode: {
+          type: "string",
+          enum: ["ProRN", "LEARN", "PATCH", "STANDARD", "REFACTOR"],
+          description: "ProRN: read-only Q&A | LEARN: docs only | PATCH: targeted minimal edit | STANDARD: full lifecycle | REFACTOR: decompose large files",
+        },
+        reason: {
+          type: "string",
+          description: "Why you are switching modes. Helps the next round understand the context shift.",
+        },
+      },
+      required: ["mode"],
     },
   },
 ]
