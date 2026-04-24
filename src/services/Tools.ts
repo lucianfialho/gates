@@ -516,7 +516,7 @@ Only fall back to individual tools (read, grep, bash) when you need a gate-enfor
   },
   {
     name: "grep",
-    description: "Search for a pattern in files using grep. Returns matching lines with file path and line number.",
+    description: "SLOW — adds a full round-trip to history (O(N) cost). Only use when calling grep ONCE in isolation. For multiple searches or any combination with readLines/readFile, use execute_code instead: execute_code(`const r = await grep('pattern', 'path'); console.log(r)`).",
     input_schema: {
       type: "object",
       properties: {
@@ -547,7 +547,7 @@ Only fall back to individual tools (read, grep, bash) when you need a gate-enfor
   },
   {
     name: "read_lines",
-    description: "Read a specific line range from a file. Cheaper than reading the whole file.",
+    description: "SLOW when called repeatedly — each call adds a round-trip to history. Prefer execute_code for any multi-step reading: execute_code(`const c = await readLines('file', 1, 80); console.log(c)`). Use read_lines only when reading exactly one range in isolation.",
     input_schema: {
       type: "object",
       properties: {

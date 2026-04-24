@@ -266,8 +266,9 @@ export const runSkill = (
       }
       const modeHint = activeMode && MODE_HINTS[activeMode] ? MODE_HINTS[activeMode] : ""
 
-      // Enforce execute_code via system prompt (zero cost per compliance vs gate overhead per violation)
-      const executeCodeRule = `\nCRITICAL TOOL RULE: NEVER call grep() or read_lines() directly — each call adds a round-trip to history (O(N) cost). ALWAYS use execute_code() to bundle reads:\n  execute_code(\`const r = await grep("pattern", "path"); const c = await readLines("file", 1, 50); console.log(r, c)\`)\nread() on small files is allowed. write(), edit(), bash() are always allowed.`
+      // Enforce execute_code via system prompt — Devin-pattern: hard prohibition + reason
+      // "Never use grep or find to search. Use your built-in search commands." (Devin, repeated 2x)
+      const executeCodeRule = `\nTOOL RULES (mandatory):\n• You must NEVER call grep() or read_lines() as individual tool calls. They add O(N) round-trips to history.\n• You must ALWAYS bundle file inspection into execute_code():\n  execute_code(\`const src = await readLines("path", 1, 80); const hits = await grep("pattern", "dir"); console.log({src, hits})\`)\n• When inspecting multiple files or running multiple searches, bundle ALL of them into ONE execute_code call.\n• read() on small files (<120 lines) is allowed. write(), edit(), bash(), glob() are always allowed.`
 
       const stateSystem = [systemContext, contextSnippet, researchInjection, executeCodeRule, modeHint + stuckHint]
         .filter(Boolean)
