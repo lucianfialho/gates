@@ -44,6 +44,10 @@ export interface LLMShape {
   readonly getCacheMetrics?: () => Effect.Effect<CacheMetrics>
 }
 
+export class MissingApiKeyError {
+  readonly _tag = "MissingApiKeyError"
+}
+
 export class LLMService extends Context.Service<LLMService, LLMShape>()(
   "gates/LLMService"
 ) {}
@@ -51,7 +55,7 @@ export class LLMService extends Context.Service<LLMService, LLMShape>()(
 // Provider resolved from (in order): env vars → .gates/config.yaml → defaults
 // API keys resolved from: env vars → ~/.local/share/gates/auth.json
 
-const makeImpl: Effect.Effect<LLMShape, never, Auth> = Effect.gen(function* () {
+const makeImpl: Effect.Effect<LLMShape, MissingApiKeyError, Auth> = Effect.gen(function* () {
   const auth = yield* Auth
   const { provider, model, baseURL } = yield* Effect.promise(() => getProviderConfig())
 
@@ -65,7 +69,7 @@ const makeImpl: Effect.Effect<LLMShape, never, Auth> = Effect.gen(function* () {
         `  Run: gates auth set sk-ant-...\n` +
         `  Or:  ANTHROPIC_API_KEY=sk-ant-... gates <command>\n`
       )
-      process.exit(1)
+      return yield* Effect.fail(new MissingApiKeyError())
     }
     return makeAnthropicProvider(apiKey)
   }
@@ -78,7 +82,7 @@ const makeImpl: Effect.Effect<LLMShape, never, Auth> = Effect.gen(function* () {
       `  Run: gates auth set ${provider} <key>\n` +
       `  Or:  GATES_API_KEY=<key> gates <command>\n`
     )
-    process.exit(1)
+    return yield* Effect.fail(new MissingApiKeyError())
   }
 
   return makeOpenAIProvider(apiKey ?? "ollama", baseURL)

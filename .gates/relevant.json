@@ -1,4 +1,4 @@
 [
-  "src/commands/clean.ts",
-  "src/cli/args.ts"
+  "src/services/providers/Anthropic.ts",
+  "src/services/providers/OpenAI.ts"
 ]
