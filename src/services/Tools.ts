@@ -1,8 +1,8 @@
 import { Context, Effect, Layer } from "effect"
-import { execFile } from "node:child_process"
-import { promisify } from "node:util"
+import { spawn, execFile } from "node:child_process"
 import { appendFile, readFile, writeFile } from "node:fs/promises"
 import { glob as fsGlob } from "node:fs/promises"
+import { promisify } from "node:util"
 import type { ToolDef } from "./LLM.js"
 
 const execFileAsync = promisify(execFile)
@@ -16,8 +16,9 @@ export class ToolError {
 }
 
 export interface ToolResult {
-  id: string
-  content: string
+  readonly id: string
+  readonly content: string
+  readonly exitCode?: number
 }
 
 type ToolHandler = (id: string, input: unknown) => Effect.Effect<ToolResult, ToolError>
@@ -34,11 +35,64 @@ export class ToolRegistry extends Context.Service<ToolRegistry, ToolRegistryShap
 const bash: ToolHandler = (id, input) =>
   Effect.tryPromise({
     try: async () => {
-      const { command, timeout = 30_000 } = input as { command: string; timeout?: number }
-      const { stdout, stderr } = await execFileAsync("bash", ["-c", command], {
-        timeout,
+      const { command } = input as { command: string }
+
+      return new Promise((resolve) => {
+        const child = spawn("sh", ["-c", command], {
+          stdio: ["ignore", "pipe", "pipe"],
+        })
+
+        let stdout = ""
+        let stderr = ""
+        let killed = false
+
+        child.stdout?.on("data", (data) => {
+          stdout += data.toString()
+          if (stdout.length > 10_000_000) {
+            stdout = stdout.slice(-10_000_000)
+          }
+        })
+
+        child.stderr?.on("data", (data) => {
+          stderr += data.toString()
+        })
+
+        child.on("close", (code, signal) => {
+          const output = stdout + stderr
+          const truncated = output.length > 10_000 ? output.slice(0, 10_000) + "\n[truncated]" : output
+          resolve({
+            id,
+            content: truncated,
+            exitCode: killed ? 1 : (code ?? (signal ? 1 : 0)),
+          })
+        })
+
+        child.on("error", (err) => {
+          const output = stdout + stderr
+          const truncated = output.length > 10_000 ? output.slice(0, 10_000) + "\n[truncated]" : output
+          resolve({ id, content: truncated + `\n[error: ${err.message}]`, exitCode: 1 })
+        })
+
+        // SIGTERM with 5s grace period then SIGKILL
+        const GRACE_PERIOD_MS = 5_000
+        let graceTimer: ReturnType<typeof setTimeout> | null = null
+
+        const setupGracefulKill = () => {
+          if (graceTimer) return
+          graceTimer = setTimeout(() => {
+            killed = true
+            child.kill("SIGKILL")
+          }, GRACE_PERIOD_MS)
+        }
+
+        process.on("SIGTERM", setupGracefulKill)
+        child.on("exit", () => {
+          process.off("SIGTERM", setupGracefulKill)
+          if (graceTimer) {
+            clearTimeout(graceTimer)
+          }
+        })
       })
-      return { id, content: stdout + (stderr ? `\nSTDERR: ${stderr}` : "") }
     },
     catch: (e) => new ToolError("bash", e),
   })
