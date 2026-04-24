@@ -166,7 +166,8 @@ export const run = (
   systemPrompt?: string,
   parentRunId?: string,
   verbose?: boolean,
-  onEvent?: (event: ChatEvent) => void
+  onEvent?: (event: ChatEvent) => void,
+  budgetTokens?: number  // mid-run budget: stops after each round if cumulative tokens exceed this
 ): Effect.Effect<RunResult, AgentError | GateError, RunDeps> =>
   Effect.gen(function* () {
     const llm = yield* LLMService
@@ -211,10 +212,20 @@ export const run = (
             .complete(messages, tools.definitions, systemPrompt)
             .pipe(Effect.mapError((e) => new AgentError(e.cause)))
 
-          yield* Ref.update(usageRef, (u) => ({
+          const newUsage = yield* Ref.updateAndGet(usageRef, (u) => ({
             input_tokens: u.input_tokens + response.usage.input_tokens,
             output_tokens: u.output_tokens + response.usage.output_tokens,
           }))
+
+          // Mid-run budget check — fires after each round, not just at state end
+          if (budgetTokens && (newUsage.input_tokens + newUsage.output_tokens) > budgetTokens) {
+            const used = newUsage.input_tokens + newUsage.output_tokens
+            console.error(`[loop] budget ${budgetTokens.toLocaleString()} exceeded mid-run: ${used.toLocaleString()} — forcing stop`)
+            onEvent?.({ type: "gate_block", gate: "budget", reason: `Mid-run budget exceeded: ${used.toLocaleString()} > ${budgetTokens.toLocaleString()}` })
+            done = true
+            yield* Ref.set(resultRef, `[budget exceeded: ${used.toLocaleString()} tokens used, budget ${budgetTokens.toLocaleString()}]`)
+            return
+          }
 
           // Measure llm_response duration
           const reqDuration = Math.round(performance.now() - reqStart)

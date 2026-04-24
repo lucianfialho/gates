@@ -305,13 +305,13 @@ export const runSkill = (
       const agentEffect = stateDef.timeout_ms
         ? Effect.promise(() =>
             Promise.race([
-              Effect.runPromise(runAgent(fullPrompt, stateSystem, runId, verbose, trackingOnEvent) as Effect.Effect<{ text: string; usage: { input_tokens: number; output_tokens: number } }, never, never>),
+              Effect.runPromise(runAgent(fullPrompt, stateSystem, runId, verbose, trackingOnEvent, stateDef.budget_tokens) as Effect.Effect<{ text: string; usage: { input_tokens: number; output_tokens: number } }, never, never>),
               new Promise<never>((_, reject) =>
                 setTimeout(() => reject(new Error(`State "${currentState}" timed out after ${stateDef.timeout_ms}ms`)), stateDef.timeout_ms!)
               ),
             ])
           ).pipe(Effect.mapError((e) => new RunnerError(`Timeout in state ${currentState}`, e)))
-        : runAgent(fullPrompt, stateSystem, runId, verbose, trackingOnEvent).pipe(
+        : runAgent(fullPrompt, stateSystem, runId, verbose, trackingOnEvent, stateDef.budget_tokens).pipe(
             Effect.mapError((e): RunnerError => e instanceof RunnerError ? e : new RunnerError(`Agent failed in state ${currentState}`, e))
           )
 
