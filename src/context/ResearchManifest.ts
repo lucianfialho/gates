@@ -34,12 +34,17 @@ const MAX_MANIFEST_ENTRIES = 20
 const MIN_SCORE_THRESHOLD = 1
 
 // Score a file path against the issue keywords
+// Stronger signal: file-level keyword match outweighs directory-level match
 const scoreFile = (filePath: string, issue: string): number => {
   const issueWords = issue.toLowerCase().split(/\W+/).filter(w => w.length > 3)
+  const fileName = filePath.split("/").pop()?.toLowerCase() ?? ""
   const fileWords = filePath.toLowerCase()
   let score = 0
   for (const word of issueWords) {
-    if (fileWords.includes(word)) score += 3  // direct path match
+    // Skip generic project-name keywords that match the whole repo
+    if (word === "gates") continue  // too generic for this project
+    if (fileName.includes(word)) score += 6   // filename match: strong signal
+    else if (fileWords.includes(word)) score += 2  // path match: weaker signal
   }
   // Bonus for explicit file path mentions in issue text
   if (issue.toLowerCase().includes(filePath.toLowerCase())) score += 10
