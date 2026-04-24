@@ -10,126 +10,28 @@ Inspired by Jesse Vincent's [Rules and Gates](https://blog.fsck.com/2026/04/07/r
 
 ![gates architecture](docs/architecture.png)
 
-```mermaid
-flowchart TB
-  classDef input     fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
-  classDef gateway   fill:#fef9c3,stroke:#ca8a04,color:#713f12
-  classDef gates_cls fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
-  classDef context   fill:#fce7f3,stroke:#db2777,color:#831843
-  classDef knowledge fill:#dcfce7,stroke:#16a34a,color:#14532d
-  classDef hooks     fill:#ffedd5,stroke:#ea580c,color:#7c2d12
-  classDef skill     fill:#f3e8ff,stroke:#9333ea,color:#3b0764
-  classDef hitl      fill:#fdf4ff,stroke:#a855f7,color:#581c87
+The system has six layers:
 
-  %% ── INPUT ──────────────────────────────────────────────────────
-  subgraph INPUT["  Input  "]
-    UP["⊙ User Prompt"]
-    SC["⊙ Shortcuts  #42 · solve-issue · write-tests · @chat"]
-  end
-
-  %% ── GATEWAY ─────────────────────────────────────────────────────
-  subgraph GATEWAY["  Gateway — Intent Router  "]
-    IEM{{"classifyIntent()"}}
-    QA["CHAT\nQ&A · explain · explore"]
-    PATCH["PATCH\nDirect agent prompt"]
-    STANDARD["STANDARD\nFull skill lifecycle"]
-  end
-
-  UP & SC --> IEM
-  IEM -->|question| QA
-  IEM -->|quick fix| PATCH
-  IEM -->|#N · fix · add · implement| STANDARD
-
-  %% ── GATES ───────────────────────────────────────────────────────
-  subgraph GATES["  Gates  "]
-    direction TB
-    AG["Ambiguity Gatekeeper\nclarify state — blocks unclear requests\nreturns questions if not actionable"]
-    BS["BashSafety Gate\nblocks force-push · rm -rf · bad scripts"]
-    MG["Metadata Gate\nblocks git commit without .metadata updated"]
-    SV["Schema Validator\nblocks state transition without valid JSON"]
-  end
-
-  %% ── CONTEXT ──────────────────────────────────────────────────────
-  subgraph CONTEXT["  Context  "]
-    direction TB
-    CM["CLAUDE.md\nProject docs → system prompt"]
-    CY[".gates/context.yaml\nAuto file tree + exports + git log"]
-    EL["Tool-result Elision\nStale reads → [cached] after 3 turns"]
-    FIL["Selective injection\nOnly files from analyze output"]
-  end
-
-  %% ── KNOWLEDGE ────────────────────────────────────────────────────
-  subgraph KNOWLEDGE["  Knowledge  "]
-    direction TB
-    META[".metadata/summary.yaml\nPer indexed directory — agent-maintained"]
-    CFG[".gates/config.yaml\nDeclares indexed directories"]
-    SKILLDIR["skills/ index\nsolve-issue · write-tests · custom"]
-    RUNS[".gates/runs/*.jsonl\nAppend-only audit trail per run"]
-  end
-
-  %% ── HOOKS ────────────────────────────────────────────────────────
-  subgraph HOOKS["  Hooks  "]
-    direction TB
-    PRE["pre_hook\nBashSafety intercepts every Bash call"]
-    GUARD["guard_hook\nMetadata gate intercepts git commit"]
-    POST["post_hook\nUpdate context.yaml after run"]
-    FAIL["fall_hook\non_error: retry · skip · abort per state"]
-  end
-
-  %% ── HITL GATE ────────────────────────────────────────────────────
-  subgraph HITL_BOX["  HITL Gate  "]
-    HITL["✋ Human Approval\nShows analyze output\nY → proceed · N → abort\nCLI readline or TUI panel"]
-  end
-
-  %% ── SKILL LIFECYCLE ──────────────────────────────────────────────
-  subgraph LIFECYCLE["  Skill Lifecycle — solve-issue  "]
-    direction LR
-    S0["clarify\n─────\ngate: ready=true\nor return questions"]
-    S1["analyze\n─────\ngate: confirmed\nfile paths + plan\nhitl_pause ✋"]
-    S2["branch\n─────\ngate: git checkout\n--show-current ✓"]
-    S3["implement\n─────\nBY CONTRACT ═══\ngate: typecheck ✓"]
-    S4["verify\n─────\ngate: passed=true\nindependent run"]
-    S5["open_pr\n─────\ngate: PR URL\nin output"]
-    DONE(["done ✓"])
-
-    S0 -->|ready=true| S1
-    S0 -->|ready=false| QOUT(["return questions"])
-    S1 --> HITL_GATE{{"HITL ✋"}}
-    HITL_GATE -->|approved| S2
-    HITL_GATE -->|rejected| ABORT(["aborted"])
-    S2 --> S3 --> S4
-    S4 -->|passed| S5 --> DONE
-    S4 -->|failed| S3
-  end
-
-  STANDARD --> LIFECYCLE
-  GATES     -.->|enforces| LIFECYCLE
-  CONTEXT   -.->|injects into system prompt| LIFECYCLE
-  KNOWLEDGE -.->|indexes + audits| LIFECYCLE
-  HOOKS     -.->|intercepts tool calls| LIFECYCLE
-  HITL_BOX  -.->|pauses between states| LIFECYCLE
-
-  class UP,SC input
-  class IEM,QA,PATCH,STANDARD gateway
-  class AG,BS,MG,SV gates_cls
-  class CM,CY,EL,FIL context
-  class META,CFG,SKILLDIR,RUNS knowledge
-  class PRE,GUARD,POST,FAIL hooks
-  class S0,S1,S2,S3,S4,S5,DONE skill
-  class HITL_GATE,HITL hitl
-```
+- **Gateway** — classifies intent (ProRN / LEARN / PATCH / STANDARD) via shortcut → heuristic → LLM, zero tokens for the common cases
+- **Gates** — PreToolUse enforcement: BashSafety, Metadata, Budget, ReadLarge (blocks full reads > 120 lines), ReadDedup (blocks re-reading the same range)
+- **Context** — `context.yaml` file tree, `chat_context` session memory, `.metadata` summaries ranked by relevance
+- **Knowledge** — `.metadata/summary.yaml` per indexed directory, `.gates/runs/` audit trail, `budget_tokens` per state
+- **Hooks** — pre/guard/post/fall/budget lifecycle hooks, gate blocks returned as tool results (agent recovers, not crashes)
+- **Lifecycle** — clarify → research → analyze → HITL → implement → ⚠️ verify → branch+PR, with `initial_state_override` for PATCH and `gates resume` for recovery
 
 ---
 
 ## The idea
 
-Most coding agents give the model instructions and hope it follows them. That's a rule. Gates is different: each state in a skill has an `output_schema` that the runner validates before advancing. No valid JSON block → retry. Schema mismatch → retry. The model can't rationalize past a gate.
+Most coding agents give the model instructions and hope it follows them. That's a rule. Gates is different: each state in a skill has an `output_schema` that the runner validates before advancing. No valid JSON block → retry or HITL. Schema mismatch → retry. The model can't rationalize past a gate.
 
 ```
-analyze  →  gate: confirmed file paths in output
-implement →  gate: typecheck_passed: true in output  
-verify   →  gate: passed: true in output
-done
+clarify   →  gate: ready=true or return questions
+research  →  gate: relevant_dirs + likely_files confirmed
+analyze   →  gate: PRP JSON valid, hitl_pause → human approves
+implement →  gate: typecheck_passed: true in output
+verify    →  gate: passed: true (budget_tokens=30k enforced)
+done      →  branch + commit + PR created deterministically
 ```
 
 Every run is persisted as JSONL in `.gates/runs/`. Every token spent is tracked. The harness was built dogfooding itself.
@@ -144,12 +46,19 @@ cd gates
 bun install
 ```
 
-Set your Anthropic API key:
+Set your API key:
 
 ```bash
-bun src/index.ts auth set sk-ant-...
-# or
-export ANTHROPIC_API_KEY=sk-ant-...
+bun src/index.ts auth set sk-ant-...          # Anthropic (default)
+bun src/index.ts auth set minimax <key>       # MiniMax
+bun src/index.ts auth set openai <key>        # OpenAI-compatible
+```
+
+Configure provider in `.gates/config.yaml`:
+
+```yaml
+provider: anthropic   # anthropic | minimax | openai | ollama
+model: claude-sonnet-4-6
 ```
 
 ---
@@ -157,20 +66,30 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ## Usage
 
 ```bash
-# Direct prompt
-bun src/index.ts "what files are in src/?"
+# Interactive TUI (recommended)
+bun src/index.ts chat
 
-# Run a skill (state machine)
-bun src/index.ts solve-issue "add a --dry-run flag to the CLI"
+# Direct prompt — Gateway classifies intent automatically
+bun src/index.ts "add a --version flag to the CLI"
+
+# Explicit mode shortcuts (in TUI or CLI)
+bun src/index.ts "@read how does Runner.ts work?"     # read-only Q&A
+bun src/index.ts "@patch fix typo in GatesConfig.ts"  # minimal change, skip research
+bun src/index.ts "@standard add budget progress bar"   # full lifecycle
+
+# Skill shortcuts
+bun src/index.ts solve-issue "add a --dry-run flag"
+bun src/index.ts solve-issue 42          # GitHub issue number
 bun src/index.ts write-tests "src/machine/schema_validate.ts"
 
-# Inspect runs
-bun src/index.ts stats          # token spend + cost per run
-bun src/index.ts logs           # list last 10 runs
-bun src/index.ts logs <runId>   # full event timeline
+# Resume a failed run from the state that failed
+bun src/index.ts resume <run-id>         # prefix match supported
 
-# Help
-bun src/index.ts help
+# Inspect runs
+bun src/index.ts stats                   # token spend + cost per run
+bun src/index.ts stats --json            # machine-readable
+bun src/index.ts logs                    # list last 10 runs
+bun src/index.ts logs <runId>            # full event timeline
 ```
 
 ---
@@ -181,14 +100,15 @@ Skills are YAML state machines in `skills/`. Each state has:
 
 - `agent_prompt` — what the agent is asked to do
 - `output_schema` — JSON Schema the output must pass (the gate)
-- `on_error: retry|skip|abort` — what happens when a gate fails
+- `on_error: retry|skip|hitl|abort` — what happens when a gate fails
+- `budget_tokens` — max tokens for this state (triggers `on_error` if exceeded)
+- `timeout_ms` — kill the agent if it runs too long
+- `hitl_pause` — pause and ask human before advancing
 - `transitions` — where to go next, optionally conditional
 
-**`solve-issue`** — analyze → implement → verify  
-Takes an issue description, confirms affected files, implements the change, runs typecheck, verifies independently.
+**`solve-issue`** — clarify → research → analyze → HITL → implement → verify → branch+PR
 
-**`write-tests`** — analyze → write → verify  
-Takes a file path, reads it, generates tests with full coverage, runs them with `bun test`.
+**`write-tests`** — analyze → write → verify
 
 ### Writing a skill
 
@@ -204,11 +124,13 @@ states:
   analyze:
     agent_prompt: |
       Analyze: {{inputs.issue}}
-      GATE CONDITION: confirm file paths exist before responding.
+      Use grep() to find relevant sections, then read_lines() for specific ranges.
       Respond with a JSON code block: { "files": [...], "plan": [...] }
     output_schema: schemas/analyze.output.schema.json
-    on_error: retry
+    on_error: hitl
     max_retries: 2
+    budget_tokens: 60000
+    hitl_pause: true
     transitions:
       - to: implement
   implement:
@@ -216,6 +138,7 @@ states:
       Implement. Run typecheck. Only respond when typecheck exits 0.
       Respond with: { "files_changed": [...], "typecheck_passed": true }
     output_schema: schemas/implement.output.schema.json
+    budget_tokens: 120000
     transitions:
       - to: done
   done:
@@ -225,29 +148,31 @@ states:
 
 ---
 
-## Tools available to the agent
+## Token efficiency
 
-| Tool | Description |
-|---|---|
-| `bash` | Run shell commands (optional timeout) |
-| `read` | Read a file |
-| `read_lines` | Read a specific line range from a file |
-| `write` | Write a file |
-| `write_lines` | Append lines to a file |
-| `edit` | Replace exact string in a file (unique match required) |
-| `glob` | List files matching a pattern |
-| `grep` | Search files for a pattern |
-| `fetch` | HTTP requests |
+Four strategies keep multi-turn agent runs lean:
+
+**read-large gate** — blocks `read()` on files > 120 lines. Forces the agent through `grep(pattern, path) → read_lines(path, start, end)`, reading only the relevant section instead of the full file.
+
+**read-dedup gate** — blocks re-reading the same `path:start-end` range within a state. Once a range is read, the agent must work with what it has.
+
+**Context elision** — `read_lines` and `grep` results older than the current turn are replaced with `[cached: read_lines(path:50-150)]` before each LLM call. Prevents O(N²) growth from history accumulation.
+
+**Budget per state** — each state has an optional `budget_tokens` limit. Exceeded budget triggers `on_error` policy (retry, skip, or hitl), preventing runaway loops.
 
 ---
 
-## Token efficiency
+## Gates
 
-Two strategies reduce the cost of multi-turn agent runs:
+| Gate | Trigger | Behavior |
+|---|---|---|
+| `BashSafety` | Every `bash` call | Blocks force-push to main, `rm` on nonexistent paths, unknown `npm run` scripts |
+| `Metadata` | `git commit` | Blocks commit if `.metadata/summary.yaml` is stale |
+| `SelectiveContext` | `read`/`write` | Limits file access to relevant paths for the current phase |
+| `ReadLarge` | `read()` on file > 120 lines | Returns block message with grep+read_lines instructions |
+| `ReadDedup` | `read_lines` or `grep` on already-fetched range | Blocks with "use the earlier result" message |
 
-**Elision** — file-read results older than 3 turns are replaced with `[file cached: path]` before each LLM call. The conversation history stays lean.
-
-**Context snapshot** — after each run, `.gates/context.yaml` is updated with the project's file tree and recent commits. The runner injects only the files relevant to the current task into the system prompt.
+Gate blocks are returned as **tool results** — the agent receives the message and adjusts its approach. Gates do not crash the state.
 
 ---
 
@@ -255,24 +180,31 @@ Two strategies reduce the cost of multi-turn agent runs:
 
 ```
 src/
-├── agent/Loop.ts          Effect-based agent loop (tool calls, message history)
+├── agent/Loop.ts           Effect-based agent loop — tool calls, context elision, message history
 ├── machine/
-│   ├── Runner.ts          State machine runner with gate enforcement
-│   ├── Skill.ts           YAML skill loader + interpolation + transition resolver
-│   ├── Persistence.ts     JSONL append-only run storage
-│   └── schema_validate.ts Minimal JSON Schema subset validator
+│   ├── Runner.ts           State machine runner — gates, HITL, budget, resume, persistence
+│   ├── Gateway.ts          Intent classification — shortcut → heuristic → LLM, 3-tier
+│   ├── Skill.ts            YAML loader + interpolation + transition resolver
+│   ├── Persistence.ts      JSONL append-only run storage (state_complete, state_error, ...)
+│   └── schema_validate.ts  Minimal JSON Schema subset validator
 ├── services/
-│   ├── LLM.ts             Anthropic SDK wrapper (claude-sonnet-4-6)
-│   ├── Tools.ts           Tool registry and handlers
-│   └── GateRegistry.ts    PreToolUse gate enforcement
+│   ├── LLM.ts              Provider abstraction (Anthropic, OpenAI-compatible, MiniMax, Ollama)
+│   ├── Tools.ts            Tool registry — read, read_lines, write, edit, bash, glob, grep, fetch
+│   └── GateRegistry.ts     PreToolUse gate enforcement pipeline
 ├── gates/
-│   └── BashSafety.ts      Blocks dangerous bash patterns
+│   ├── BashSafety.ts       Blocks dangerous bash patterns
+│   ├── Metadata.ts         Blocks stale commits
+│   ├── ContextScope.ts     Selective file access by phase
+│   ├── ReadLarge.ts        Forces grep+read_lines on large files
+│   └── ReadDedup.ts        Blocks re-reading same range within a state
 ├── context/
-│   └── ProjectContext.ts  Project snapshot for context injection
-└── auth/Auth.ts           BYOK — env var or ~/.local/share/gates/auth.json
+│   ├── ProjectContext.ts   Project snapshot for context injection
+│   ├── ResearchContext.ts  .metadata summaries ranked by relevance
+│   └── RelevantPaths.ts    Tracks files relevant to the current task
+└── auth/Auth.ts            BYOK — env var or ~/.local/share/gates/auth.json
 ```
 
-All layers are Effect V4 services. Dependency injection via `Context.Service` + `Layer`.
+All layers are Effect V4 services. Dependency injection via `Context.Service` + `Layer`. Error channels are typed — `Effect<A, GateError | RunnerError | LLMError, Deps>`.
 
 ---
 
@@ -281,7 +213,7 @@ All layers are Effect V4 services. Dependency injection via `Context.Service` + 
 - [Rules and Gates](https://blog.fsck.com/2026/04/07/rules-and-gates/) — Jesse Vincent's thesis that this harness implements
 - [atomic-gates](https://github.com/lucianfialho/atomic-gates) — the Claude Code plugin this project grew out of
 - [effect](https://github.com/Effect-TS/effect) — the TypeScript runtime powering the agent loop
-- [obra/superpowers](https://github.com/obra/superpowers) — the skill corpus that inspired the YAML skill format
+- [MemGPT](https://arxiv.org/abs/2310.08560) — the memory hierarchy concept behind read-large + read-dedup
 
 ---
 
