@@ -205,6 +205,9 @@ export const runSkill = (
       // Reset read-dedup history so each state starts fresh
       clearReadHistory()
 
+      // Expose current state to gates (e.g. VerifyReadOnly blocks writes in verify)
+      process.env["GATES_ACTIVE_STATE"] = currentState
+
       // Emit state change so TUI can show current phase
       const stateStep = Object.keys(skill.states).indexOf(currentState) + 1
       onEvent?.({ type: "state_change", state: currentState, step: stateStep, total: nonTerminalStates })

@@ -6,6 +6,7 @@ import { metadataGate } from "./Metadata.js"
 import { selectiveContextGate } from "./ContextScope.js"
 import { readLargeGate } from "./ReadLarge.js"
 import { readDedupGate } from "./ReadDedup.js"
+import { verifyReadOnlyGate } from "./VerifyReadOnly.js"
 import type { GatesConfig } from "../config/GatesConfig.js"
 import type { ProjectContext } from "../context/ProjectContext.js"
 
@@ -37,5 +38,6 @@ export const BuiltinGatesLayer = Layer.effectDiscard(
     registry.register(selectiveContextGate)
     registry.register(readLargeGate)
     registry.register(readDedupGate)
+    registry.register(verifyReadOnlyGate)
   })
 )

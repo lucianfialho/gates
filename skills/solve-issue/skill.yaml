@@ -251,13 +251,14 @@ states:
       PRP acceptance criteria:
       {{outputs.analyze.acceptance}}
 
-      Steps — commands only, no file reads:
+      Steps — commands only, NO file edits, NO writes:
       1. Run: bash("bun run typecheck 2>&1") — must exit 0
       2. For any criterion that requires running a command: run it
       3. For criteria about code structure (not runnable): mark as verified-by-implement
 
-      GATE CONDITION: typecheck exits 0. Do not read files.
-      If typecheck passes and implement confirmed the changes, that is sufficient.
+      GATE CONDITION: typecheck exits 0. Do not read or edit files.
+      You CANNOT fix issues here — report them in `issues` and set passed=false.
+      The Runner will handle returning to implement via HITL if needed.
 
       Respond with a JSON code block:
       ```json
@@ -268,7 +269,7 @@ states:
       }
       ```
     output_schema: schemas/verify.output.schema.json
-    on_error: retry
+    on_error: hitl
     max_retries: 1
     budget_tokens: 30000
     timeout_ms: 60000
