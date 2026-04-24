@@ -19,7 +19,17 @@ const filteredArgs = rawArgs.filter(a => a !== "--verbose" && a !== "-v")
 const verbose = rawArgs.includes("--verbose") || rawArgs.includes("-v")
 const [cmd, ...rest] = filteredArgs
 
+// When GATES_NO_LLM=1, LLM-dependent commands exit early with a message.
+// Used by verify state to test simple commands without initializing LLMService.
+const NO_LLM = process.env["GATES_NO_LLM"] === "1"
+const LLM_COMMANDS = new Set(["chat", "run", "resume", "gateway"])
+
 export async function routeCommand() {
+  if (NO_LLM && cmd && LLM_COMMANDS.has(cmd)) {
+    console.log(`[gates] GATES_NO_LLM=1 — command "${cmd}" requires LLM, skipped`)
+    process.exit(0)
+  }
+
   switch (cmd) {
     case "auth": {
       await runAuth(rest)

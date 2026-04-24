@@ -253,8 +253,11 @@ states:
 
       Steps — commands only, NO file edits, NO writes:
       1. Run: bash("bun run typecheck 2>&1") — must exit 0
-      2. For any criterion that requires running a command: run it
-      3. For criteria about code structure (not runnable): mark as verified-by-implement
+      2. For acceptance criteria that require running the gates binary: use
+         bash("GATES_NO_LLM=1 bun src/index.ts <command> 2>&1")
+         This prevents recursive LLMService initialization errors.
+      3. Do NOT run: bun src/index.ts chat, run, resume, or gateway — those need LLM.
+      4. For criteria about code structure (not runnable): mark as verified-by-implement
 
       GATE CONDITION: typecheck exits 0. Do not read or edit files.
       You CANNOT fix issues here — report them in `issues` and set passed=false.
