@@ -11,6 +11,7 @@ import { runLogs } from "./commands/logs.js"
 import { runResume } from "./commands/resume.js"
 import { runSkillShortcut, runSkillByPath } from "./commands/skill.js"
 import { runGateway } from "./commands/gateway.js"
+import { startChatTUI } from "./commands/chat.js"
 
 // ─── CLI routing ──────────────────────────────────────────────────────────────
 
@@ -69,29 +70,7 @@ async function main() {
     }
 
     case "chat": {
-      const { startChat } = await import("./chat/index.js")
-      const { readFile } = await import("node:fs/promises")
-      const { Layer } = await import("effect")
-      const { LLMLayer } = await import("./services/LLM.js")
-      const { GateRegistryLayer } = await import("./services/GateRegistry.js")
-      const { ToolRegistryLayer } = await import("./services/Tools.js")
-      const { BuiltinGatesLayer } = await import("./gates/builtin.js")
-      const { PersistenceLayer } = await import("./machine/Persistence.js")
-      const { GatewayServiceLive } = await import("./machine/Gateway.js")
-      const AppLayer = Layer.mergeAll(
-        LLMLayer,
-        GateRegistryLayer,
-        ToolRegistryLayer,
-        PersistenceLayer,
-        BuiltinGatesLayer.pipe(Layer.provide(GateRegistryLayer)),
-        GatewayServiceLive.pipe(Layer.provide(LLMLayer))
-      )
-      let systemPrompt: string | undefined
-      try {
-        const claude = await readFile("CLAUDE.md", "utf-8")
-        systemPrompt = `You are an autonomous coding agent. Here is the project context:\n\n${claude}\n\nCurrent working directory: ${process.cwd()}`
-      } catch { /* no CLAUDE.md */ }
-      await startChat(AppLayer as never, systemPrompt)
+      await startChatTUI()
       break
     }
 
@@ -113,8 +92,9 @@ async function main() {
 
     default: {
       if (!cmd) {
-        console.log(USAGE)
-        process.exit(1)
+        // No args → open TUI (default mode)
+        await startChatTUI()
+        break
       }
 
       // Skill shortcut: gates <token> → skills/<token>/skill.yaml
