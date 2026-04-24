@@ -70,6 +70,9 @@ export const updateContextFile = async (): Promise<void> => {
   } catch { /* best-effort */ }
 }
 
+const MAX_CONTEXT_CHARS = 12_000  // ~3k tokens — matches claw-code's 12K budget
+const MAX_FILE_ENTRY_CHARS = 120   // one line per file max
+
 export const buildContextPrompt = async (filterFiles?: string[]): Promise<string | null> => {
   try {
     const raw = await readFile(CONTEXT_FILE, "utf-8")
@@ -81,18 +84,25 @@ export const buildContextPrompt = async (filterFiles?: string[]): Promise<string
       : allFiles
 
     const fileLines = relevant
-      .map(([path, { lines, exports }]) =>
-        `  ${path} (${lines} lines)${exports.length ? ` — exports: ${exports.slice(0, 6).join(", ")}` : ""}`
-      )
+      .map(([path, { lines, exports }]) => {
+        const entry = `  ${path} (${lines} lines)${exports.length ? ` — exports: ${exports.slice(0, 4).join(", ")}` : ""}`
+        return entry.slice(0, MAX_FILE_ENTRY_CHARS)
+      })
       .join("\n")
 
-    const changes = ctx.recent_changes.map((c) => `  ${c}`).join("\n")
+    const changes = ctx.recent_changes.slice(0, 5).map((c) => `  ${c}`).join("\n")
 
-    return [
+    const result = [
       `## Project snapshot (${ctx.updated_at.slice(0, 10)})`,
       `Files:\n${fileLines}`,
       changes ? `Recent commits:\n${changes}` : "",
     ].filter(Boolean).join("\n\n")
+
+    // Hard cap — truncate with notice rather than silently blow up context
+    if (result.length > MAX_CONTEXT_CHARS) {
+      return result.slice(0, MAX_CONTEXT_CHARS) + `\n… [truncated at ${MAX_CONTEXT_CHARS} chars]`
+    }
+    return result
   } catch {
     return null
   }

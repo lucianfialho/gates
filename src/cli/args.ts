@@ -11,6 +11,7 @@ import { runResume } from "../commands/resume.js"
 import { runSkillShortcut, runSkillByPath } from "../commands/skill.js"
 import { runGateway } from "../commands/gateway.js"
 import { startChatTUI } from "../commands/chat.js"
+import { runVersion } from "../commands/version.js"
 
 const rawArgs = process.argv.slice(2)
 const filteredArgs = rawArgs.filter(a => a !== "--verbose" && a !== "-v")
@@ -48,6 +49,13 @@ export async function routeCommand() {
 
     case "chat": {
       await startChatTUI()
+      break
+    }
+
+    case "--version":
+    case "-V":
+    case "version": {
+      await runVersion()
       break
     }
 

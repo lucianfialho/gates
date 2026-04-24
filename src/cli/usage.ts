@@ -15,5 +15,6 @@ USAGE
   gates auth set <key>                              save API key
   gates auth show                                   show stored key (masked)
   gates auth remove                                 delete stored key
+  gates version                                    show version
   gates help                                        show this message
 `.trim()

@@ -138,21 +138,26 @@ export const buildResearchContext = (issue: string): Effect.Effect<ResearchConte
 
 // ── prompt formatter ──────────────────────────────────────────────────────────
 
+const MAX_RESEARCH_DIRS = 5       // top-N relevant dirs only
+const MAX_COVERS = 4              // covers per dir
+const MAX_ISSUE_BODY = 120        // chars per related issue body
+const MAX_RELATED_ISSUES = 3      // related issues max
+
 export const formatResearchContext = (ctx: ResearchContext): string => {
   const lines: string[] = ["=== Project metadata (ranked by relevance) ==="]
 
-  for (const s of ctx.summaries) {
+  for (const s of ctx.summaries.slice(0, MAX_RESEARCH_DIRS)) {
     lines.push(`\n${s.dir}/`)
     if (s.title)   lines.push(`  title: ${s.title}`)
-    if (s.covers?.length) lines.push(`  covers: ${s.covers.join(", ")}`)
+    if (s.covers?.length) lines.push(`  covers: ${s.covers.slice(0, MAX_COVERS).join(", ")}`)
     if (s.specialist) lines.push(`  specialist: ${s.specialist}`)
   }
 
   if (ctx.related.length > 0) {
-    lines.push("\n=== Related issues (pre-fetched from GitHub) ===")
-    for (const r of ctx.related) {
-      lines.push(`\n#${r.number} [${r.state}] ${r.title}`)
-      if (r.body) lines.push(`  context: ${r.body.replace(/\n/g, " ").slice(0, 200)}`)
+    lines.push("\n=== Related issues ===")
+    for (const r of ctx.related.slice(0, MAX_RELATED_ISSUES)) {
+      lines.push(`#${r.number} [${r.state}] ${r.title}`)
+      if (r.body) lines.push(`  ${r.body.replace(/\n/g, " ").slice(0, MAX_ISSUE_BODY)}`)
     }
   }
 
