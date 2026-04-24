@@ -14,17 +14,16 @@ type RunDeps = LLMService | GateRegistry | ToolRegistry | Persistence
 
 const now = () => new Date().toISOString()
 
-// Replace stale file-read results with a placeholder so they don't
-// accumulate in the message history across many tool-call rounds.
-// Elide older duplicate reads — keeps only the LATEST read of each path+range.
-// Agent only sees [cached] when it already re-read that range later, so it
-// has no reason to re-read again.
+// Hybrid elision: elide reads that are EITHER duplicated OR older than MAX_VISIBLE_TURNS.
+// Duplicates: agent already re-read, old result is stale.
+// Age-based: after MAX_VISIBLE_TURNS the agent has processed the content; keeping it
+// wastes context tokens. We keep the 2 most recent turns of any read always visible
+// so the agent doesn't need to re-fetch what it just read.
+const MAX_VISIBLE_TURNS = 3
+
 const elideStaleReads = (messages: Message[]): Message[] => {
-  // Build label map: tool_id → human-readable label
   const toolLabels = new Map<string, string>()
-  // Track which turn each tool_id was called in
   const idToTurn = new Map<string, number>()
-  // Track the latest turn each label appears in
   const latestTurnForLabel = new Map<string, number>()
 
   let turn = 0
@@ -50,6 +49,8 @@ const elideStaleReads = (messages: Message[]): Message[] => {
     turn++
   }
 
+  const currentTurn = turn
+
   return messages.map((msg) => {
     if (msg.role !== "tool") return msg
     return {
@@ -59,9 +60,10 @@ const elideStaleReads = (messages: Message[]): Message[] => {
         if (!label) return r
         const myTurn = idToTurn.get(r.id) ?? -1
         const latestTurn = latestTurnForLabel.get(label) ?? -1
-        // Only elide if this same label was read again in a LATER turn
-        if (myTurn < latestTurn) {
-          return { id: r.id, content: `[duplicate: ${label} — use the later result]` }
+        const isDuplicate = myTurn < latestTurn
+        const isOld = (currentTurn - myTurn) > MAX_VISIBLE_TURNS
+        if (isDuplicate || isOld) {
+          return { id: r.id, content: `[cached: ${label}${isDuplicate ? " — superseded by later read" : " — use grep/read_lines to re-fetch if needed"}]` }
         }
         return r
       }),
