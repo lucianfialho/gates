@@ -28,24 +28,16 @@ const isExempt = (path: string) => EXEMPT.some(pat => path.includes(pat))
 
 export const writeLargeGate: Gate = {
   name: "write-large",
-  matches: (call: ToolCall) => call.name === "write" || call.name === "edit",
+  // Only check write (full file creation/replacement) — edit is always targeted,
+  // and blocking edit on already-large files prevents any fix to those files.
+  matches: (call: ToolCall) => call.name === "write",
   check: (call: ToolCall) => {
     const input = call.input as Record<string, unknown>
     const path = String(input["path"] ?? input["file_path"] ?? "")
     if (!path || isExempt(path)) return pass
 
-    let resultLines: number
-
-    if (call.name === "write") {
-      const content = String(input["content"] ?? "")
-      resultLines = countLines(content)
-    } else {
-      // edit: existing lines + net change
-      const existing = existingLines(path)
-      const oldStr = String(input["old_string"] ?? "")
-      const newStr = String(input["new_string"] ?? "")
-      resultLines = existing - countLines(oldStr) + countLines(newStr)
-    }
+    const content = String(input["content"] ?? "")
+    const resultLines = countLines(content)
 
     if (resultLines <= MAX_LINES) return pass
 
