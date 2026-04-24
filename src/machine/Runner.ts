@@ -266,7 +266,10 @@ export const runSkill = (
       }
       const modeHint = activeMode && MODE_HINTS[activeMode] ? MODE_HINTS[activeMode] : ""
 
-      const stateSystem = [systemContext, contextSnippet, researchInjection, modeHint + stuckHint]
+      // Enforce execute_code via system prompt (zero cost per compliance vs gate overhead per violation)
+      const executeCodeRule = `\nCRITICAL TOOL RULE: NEVER call grep() or read_lines() directly — each call adds a round-trip to history (O(N) cost). ALWAYS use execute_code() to bundle reads:\n  execute_code(\`const r = await grep("pattern", "path"); const c = await readLines("file", 1, 50); console.log(r, c)\`)\nread() on small files is allowed. write(), edit(), bash() are always allowed.`
+
+      const stateSystem = [systemContext, contextSnippet, researchInjection, executeCodeRule, modeHint + stuckHint]
         .filter(Boolean)
         .join("\n\n")
         .trim() || undefined

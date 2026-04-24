@@ -44,6 +44,7 @@ export const BuiltinGatesLayer = Layer.effectDiscard(
     registry.register(verifyReadOnlyGate)
     registry.register(writeLargeGate)
     registry.register(workspaceBoundaryGate)
-    registry.register(executeCodeEnforceGate)
+    // executeCodeEnforceGate disabled — reactive gate creates more overhead than it saves.
+    // Enforcement is done via system prompt instead (zero cost per compliance).
   })
 )
