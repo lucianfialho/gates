@@ -2,7 +2,7 @@ import { Context, Effect, Layer, pipe } from "effect"
 import type Anthropic from "@anthropic-ai/sdk"
 import { LLMService, LLMError } from "../services/LLM.js"
 
-export type GatewayMode = "ProRN" | "LEARN" | "PATCH" | "STANDARD"
+export type GatewayMode = "ProRN" | "LEARN" | "PATCH" | "STANDARD" | "REFACTOR"
 
 export interface GatewayDecision {
   mode: GatewayMode
@@ -32,6 +32,7 @@ const SHORTCUT_MAP: Record<string, GatewayMode> = {
   "@patch":    "PATCH",
   "@standard": "STANDARD",
   "@learn":    "LEARN",
+  "@refactor": "REFACTOR",
 }
 
 const detectShortcut = (

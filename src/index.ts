@@ -326,6 +326,11 @@ const runLogs = async (runId?: string) => {
 }
 
 const main = async () => {
+  if (cmd === "version") {
+    console.log("0.1.0")
+    return
+  }
+
   if (cmd === "stats") {
     await runStats()
     return
@@ -569,6 +574,33 @@ EXAMPLES
           )
         } else {
           const result = yield* run(decision.intent, systemPrompt, undefined, verbose)
+          console.log(result.text || "(no output)")
+          yield* Effect.promise(() => updateContextFile())
+        }
+        break
+      }
+
+      case "REFACTOR": {
+        // Decompose large file — use refactor-decompose skill if available
+        const refactorSkill = join(skillsDir, "refactor-decompose", "skill.yaml")
+        const hasRefactorSkill = yield* Effect.promise(() => access(refactorSkill).then(() => true).catch(() => false))
+        if (hasRefactorSkill) {
+          yield* runSkill(
+            resolve(refactorSkill),
+            { target: decision.intent },
+            systemPrompt,
+            verbose,
+            cliHITL
+          ).pipe(
+            Effect.tap((results) => Effect.sync(() => {
+              const last = Object.values(results).at(-1)
+              if (last) console.log(JSON.stringify(last.output, null, 2))
+            }))
+          )
+        } else {
+          // Fallback: freeform agent with refactor system prompt
+          const refactorSystem = `${systemPrompt ?? ""}\n\nMode: REFACTOR. You are decomposing a large file into smaller modules. Each output file must be < 150 lines. Do not add features — only move code.`
+          const result = yield* run(decision.intent, refactorSystem, undefined, verbose)
           console.log(result.text || "(no output)")
           yield* Effect.promise(() => updateContextFile())
         }

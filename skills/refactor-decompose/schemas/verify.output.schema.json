@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "required": ["passed", "checks_run"],
+  "properties": {
+    "passed": { "type": "boolean" },
+    "checks_run": { "type": "array", "items": { "type": "string" } },
+    "largest_file": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "lines": { "type": "number" }
+      }
+    },
+    "issues": { "type": "array", "items": { "type": "string" } }
+  }
+}

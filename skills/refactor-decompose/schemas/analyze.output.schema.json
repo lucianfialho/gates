@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "required": ["target_file", "current_lines", "modules", "residual_lines"],
+  "properties": {
+    "target_file": { "type": "string" },
+    "current_lines": { "type": "number" },
+    "modules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["output_file", "exports", "estimated_lines"],
+        "properties": {
+          "output_file": { "type": "string" },
+          "exports": { "type": "array", "items": { "type": "string" } },
+          "estimated_lines": { "type": "number" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "residual_lines": { "type": "number" },
+    "residual_description": { "type": "string" }
+  }
+}

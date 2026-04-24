@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "required": ["files_created", "typecheck_passed", "summary"],
+  "properties": {
+    "files_created": { "type": "array", "items": { "type": "string" } },
+    "files_modified": { "type": "array", "items": { "type": "string" } },
+    "typecheck_passed": { "type": "boolean" },
+    "max_file_lines": { "type": "number" },
+    "summary": { "type": "string" }
+  }
+}

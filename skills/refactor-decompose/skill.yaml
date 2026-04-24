@@ -1,0 +1,130 @@
+id: refactor-decompose
+version: 1
+description: |
+  Decompose a large file into smaller modules following Object Calisthenics rule #7.
+  Each output file must be < 150 lines. No new features — only code movement.
+
+initial_state: analyze
+
+inputs:
+  required:
+    - name: target
+      type: string
+      description: File path to decompose (e.g. "src/index.ts") or description
+
+states:
+  analyze:
+    description: |
+      Read the target file, identify natural decomposition boundaries.
+      Group by: commands, utilities, types, handlers. Produce extraction plan.
+      GATE: each proposed output file must be < 150 lines.
+    agent_prompt: |
+      You are decomposing a large file into smaller modules.
+      RULE: No new features. Only move existing code to new files.
+      RULE: Every output file must be < 150 lines.
+      RULE: The original file must also end up < 150 lines (re-exporting or thin dispatcher).
+
+      Target: {{inputs.target}}
+
+      Steps:
+      1. Use grep to find function/class/const declarations
+      2. Use read_lines to read relevant sections
+      3. Group declarations into logical modules (commands/, utils/, types/)
+      4. Verify each group would be < 150 lines
+
+      Respond with a JSON code block:
+      ```json
+      {
+        "target_file": "src/index.ts",
+        "current_lines": 591,
+        "modules": [
+          {
+            "output_file": "src/commands/stats.ts",
+            "exports": ["runStats"],
+            "estimated_lines": 65,
+            "description": "stats command with table formatting"
+          }
+        ],
+        "residual_lines": 45,
+        "residual_description": "thin dispatcher importing from src/commands/"
+      }
+      ```
+    output_schema: schemas/analyze.output.schema.json
+    on_error: hitl
+    max_retries: 2
+    hitl_pause: true
+    budget_tokens: 60000
+
+  implement:
+    description: |
+      Execute the decomposition plan from analyze.
+      Create each module file, update imports in the original file.
+      GATE: typecheck exits 0, all output files < 150 lines.
+    agent_prompt: |
+      Execute the decomposition plan exactly as approved.
+
+      Plan:
+      - Target: {{outputs.analyze.target_file}} ({{outputs.analyze.current_lines}} lines)
+      - Modules to create: {{outputs.analyze.modules}}
+      - Residual target: {{outputs.analyze.residual_lines}} lines
+
+      Steps:
+      1. For each module in the plan: create the file, move the code
+      2. Update imports in {{outputs.analyze.target_file}}
+      3. Run: bash("bun run typecheck 2>&1") — fix until exit 0
+      4. Verify each new file is < 150 lines: bash("wc -l src/commands/*.ts")
+      5. Stage all files: bash("git add -A")
+
+      GATE CONDITION: typecheck exits 0, no file > 150 lines.
+
+      Respond with a JSON code block:
+      ```json
+      {
+        "files_created": ["src/commands/stats.ts"],
+        "files_modified": ["src/index.ts"],
+        "typecheck_passed": true,
+        "max_file_lines": 142,
+        "summary": "Extracted stats and logs commands to src/commands/"
+      }
+      ```
+    output_schema: schemas/implement.output.schema.json
+    on_error: hitl
+    budget_tokens: 120000
+
+  verify:
+    description: |
+      Verify decomposition: typecheck, file sizes, no regressions.
+      GATE: passed=true, all files < 150 lines.
+    agent_prompt: |
+      Verify the decomposition. Commands only — do NOT edit files.
+
+      Changes made: {{outputs.implement.summary}}
+
+      Steps:
+      1. bash("bun run typecheck 2>&1") — must exit 0
+      2. bash("find src -name '*.ts' | xargs wc -l | sort -rn | head -10") — no file > 150 lines
+      3. bash("git diff --stat HEAD") — confirm only expected files changed
+
+      Respond with a JSON code block:
+      ```json
+      {
+        "passed": true,
+        "checks_run": ["typecheck", "file-size-check", "diff-review"],
+        "largest_file": {"path": "src/index.ts", "lines": 45},
+        "issues": []
+      }
+      ```
+    output_schema: schemas/verify.output.schema.json
+    on_error: hitl
+    max_retries: 1
+    budget_tokens: 30000
+    timeout_ms: 60000
+    transitions:
+      - to: done
+        when: passed == true
+      - to: implement
+
+  done:
+    terminal: true
+    description: Decomposition complete. All files within 150-line limit.
+    agent_prompt: ""
