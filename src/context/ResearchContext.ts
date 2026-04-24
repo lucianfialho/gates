@@ -160,10 +160,12 @@ export const formatResearchContext = (ctx: ResearchContext): string => {
   }
 
   if (ctx.related.length > 0) {
-    lines.push("\n=== Related issues ===")
+    // Label as CONTEXT only — do NOT call gh_issue_read on these.
+    // These are past issues for learning lessons, NOT the task to implement.
+    lines.push("\n=== Past issues (context/lessons only — do NOT implement these) ===")
     for (const r of ctx.related.slice(0, MAX_RELATED_ISSUES)) {
-      lines.push(`#${r.number} [${r.state}] ${r.title}`)
-      if (r.body) lines.push(`  ${r.body.replace(/\n/g, " ").slice(0, MAX_ISSUE_BODY)}`)
+      lines.push(`  past#${r.number} [${r.state}] ${r.title}`)
+      if (r.body) lines.push(`    lesson: ${r.body.replace(/\n/g, " ").slice(0, MAX_ISSUE_BODY)}`)
     }
   }
 
