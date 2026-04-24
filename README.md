@@ -8,6 +8,8 @@ Inspired by Jesse Vincent's [Rules and Gates](https://blog.fsck.com/2026/04/07/r
 
 ## Architecture
 
+![gates architecture](docs/architecture.png)
+
 ```mermaid
 flowchart TB
   classDef input     fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
