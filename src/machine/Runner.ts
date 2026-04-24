@@ -13,6 +13,7 @@ import { buildContextPrompt, updateContextFile } from "../context/ProjectContext
 import { writeRelevantPaths } from "../context/RelevantPaths.js"
 import { buildResearchContext, formatResearchContext } from "../context/ResearchContext.js"
 import { clearReadHistory } from "../gates/ReadDedup.js"
+import { buildResearchManifest, formatManifestContext, clearManifest } from "../context/ResearchManifest.js"
 import { validate } from "./schema_validate.js"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
@@ -230,14 +231,26 @@ export const runSkill = (
 
       const fullPrompt = statePrompt + schemaInstructions
 
-      // For research state: pre-load metadata summaries + GitHub issues via Effect pipeline
-      // This replaces LLM tool calls with deterministic data — zero tokens for discovery
+      // For research state: build deterministic manifest (zero LLM tokens) + metadata summaries
+      // Manifest = autoresearch pattern: pre-scope files before agent reads anything
       let researchInjection = ""
       if (currentState === "research") {
         const rawIssue = inputs["issue"] ?? ""
+
+        // Step 1: Build manifest deterministically (zero LLM) — autoresearch pattern
+        const manifest = yield* Effect.promise(() => buildResearchManifest(rawIssue))
+        const manifestText = formatManifestContext(manifest)
+        console.error(`[gates] manifest: ${manifest.manifest.length} files pre-scoped (0 LLM tokens)`)
+
+        // Step 2: Load metadata summaries + GitHub issues
         const researchCtx = yield* buildResearchContext(rawIssue)
-        researchInjection = formatResearchContext(researchCtx)
+        researchInjection = manifestText + "\n" + formatResearchContext(researchCtx)
         console.error(`[gates] research context: ${researchCtx.summaries.length} summaries, ${researchCtx.related.length} related issues`)
+      }
+
+      // Clear manifest when leaving research state
+      if (currentState !== "research" && outputs["research"]) {
+        yield* Effect.promise(() => clearManifest().catch(() => {}))
       }
 
       // Inject project context — filter to confirmed files only (reduces tokens significantly)

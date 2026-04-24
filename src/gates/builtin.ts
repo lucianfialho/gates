@@ -10,6 +10,7 @@ import { verifyReadOnlyGate } from "./VerifyReadOnly.js"
 import { writeLargeGate } from "./WriteLarge.js"
 import { workspaceBoundaryGate } from "./WorkspaceBoundary.js"
 import { executeCodeEnforceGate } from "./ExecuteCodeEnforce.js"
+import { manifestBoundaryGate } from "./ManifestBoundary.js"
 import type { GatesConfig } from "../config/GatesConfig.js"
 import type { ProjectContext } from "../context/ProjectContext.js"
 
@@ -44,6 +45,7 @@ export const BuiltinGatesLayer = Layer.effectDiscard(
     registry.register(verifyReadOnlyGate)
     registry.register(writeLargeGate)
     registry.register(workspaceBoundaryGate)
+    registry.register(manifestBoundaryGate)
     // executeCodeEnforceGate disabled — reactive gate creates more overhead than it saves.
     // Enforcement is done via system prompt instead (zero cost per compliance).
   })
