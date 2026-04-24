@@ -505,6 +505,7 @@ export const App = ({ runEffect, systemPrompt }: {
       {status === "hitl" && hitl && (() => {
         const o = hitl.output as Record<string, unknown> | null
         const isPRP = !hitl.isError && o && ("context" in o || "spec" in o)
+        const isDecompose = !hitl.isError && o && ("modules" in o && "residual_lines" in o)
         const ctx = isPRP ? o!["context"] as Record<string, unknown> : null
         const spec = isPRP ? o!["spec"] as Record<string, unknown> : null
         const acc = isPRP ? o!["acceptance"] as string[] | undefined : undefined
@@ -543,6 +544,25 @@ export const App = ({ runEffect, systemPrompt }: {
                   <text><b fg="#FFFFFF">Acceptance:</b></text>
                   {acc.map((a, i) => <text key={i} fg="#88FF88">  ✓ {a.slice(0, termSize.cols - 20)}</text>)}
                 </box>}
+              </box>
+            ) : isDecompose ? (
+              <box flexDirection="column">
+                <text fg="#CCCCCC"><b fg="#FFFFFF">Target: </b>{String(o!["target_file"])} ({Number(o!["current_lines"]).toLocaleString()} lines)</text>
+                {Array.isArray(o!["modules"]) && (o!["modules"] as Array<Record<string, unknown>>).length > 0 && (
+                  <box flexDirection="column" marginTop={1}>
+                    <text><b fg="#FFFFFF">Modules to extract:</b></text>
+                    {(o!["modules"] as Array<Record<string, unknown>>).map((m, i) => (
+                      <text key={i} fg="#88CCFF">
+                        {`  • ${String(m["output_file"]).padEnd(40)}${String(m["estimated_lines"]).padStart(4)} lines`}
+                        {m["exports"] ? ` — exports: ${(m["exports"] as string[]).join(", ")}` : ""}
+                      </text>
+                    ))}
+                  </box>
+                )}
+                <text fg="#CCCCCC" marginTop={1}>
+                  <b fg="#FFFFFF">Residual: </b>{Number(o!["residual_lines"]).toLocaleString()} lines
+                  {o!["residual_description"] ? ` — ${String(o!["residual_description"])}` : ""}
+                </text>
               </box>
             ) : (
               <text fg="#CCCCCC">{
