@@ -424,8 +424,35 @@ const handlers = new Map<string, ToolHandler>([
 
 const definitions: ToolDef[] = [
   {
+    name: "execute_code",
+    description: `PRIMARY TOOL — Use this first for any task involving reading files, grepping, or chaining operations. It runs all operations in ONE round instead of many, keeping the context window small.
+
+Available async functions:
+  readFile(path)              — read full file content
+  readLines(path, start, end) — read specific line range
+  writeFile(path, content)    — write a file
+  appendFile(path, content)   — append to a file
+  grep(pattern, path)         — search for pattern
+  glob(pattern, cwd?)         — list matching files
+  bash(command)               — run shell command
+
+Use console.log() to return results:
+  const src = await readLines("src/cli/args.ts", 1, 50)
+  const pkg = JSON.parse(await readFile("package.json"))
+  console.log(JSON.stringify({ src, version: pkg.version }))
+
+Only fall back to individual tools (read, grep, bash) when you need a gate-enforced single operation.`,
+    input_schema: {
+      type: "object",
+      properties: {
+        code: { type: "string", description: "Async JavaScript. Use console.log() to return results." },
+      },
+      required: ["code"],
+    },
+  },
+  {
     name: "bash",
-    description: "Run a shell command",
+    description: "Run a shell command. Prefer execute_code for multi-step operations.",
     input_schema: {
       type: "object",
       properties: {
@@ -437,7 +464,7 @@ const definitions: ToolDef[] = [
   },
   {
     name: "read",
-    description: "Read a file",
+    description: "Read a file. Prefer execute_code when reading multiple files.",
     input_schema: {
       type: "object",
       properties: { path: { type: "string" } },
@@ -591,34 +618,6 @@ const definitions: ToolDef[] = [
         base: { type: "string", description: "Base branch. Defaults to main." },
       },
       required: ["title", "body"],
-    },
-  },
-  {
-    name: "execute_code",
-    description: `Execute JavaScript code in a sandboxed context. PREFER this over multiple individual tool calls when you need to read several files, run multiple greps, or chain operations — it reduces context window usage dramatically.
-
-Available functions inside the code (all async):
-  readFile(path: string): Promise<string>
-  readLines(path: string, start: number, end: number): Promise<string>
-  writeFile(path: string, content: string): Promise<string>
-  appendFile(path: string, content: string): Promise<string>
-  grep(pattern: string, path: string): Promise<string>
-  glob(pattern: string, cwd?: string): Promise<string>
-  bash(command: string): Promise<string>
-
-Use console.log() to return results. Example:
-  const content = await readLines("src/cli/args.ts", 1, 30)
-  const exports = await grep("export", "src/cli/args.ts")
-  console.log(JSON.stringify({ content, exports }))`,
-    input_schema: {
-      type: "object",
-      properties: {
-        code: {
-          type: "string",
-          description: "Async JavaScript code to execute. Use console.log() to return results.",
-        },
-      },
-      required: ["code"],
     },
   },
   {
