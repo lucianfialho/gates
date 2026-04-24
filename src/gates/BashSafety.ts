@@ -68,6 +68,27 @@ const checkFileOp = (cmd: string): Effect.Effect<void, GateError> => {
   return pass
 }
 
+// --- dangerous redirect/pipe patterns (from claw-code allowlist) ---
+// Block shell redirects that could overwrite system files or inject data
+
+const DANGEROUS_PATTERNS: Array<{ re: RegExp; reason: string }> = [
+  { re: /\bcurl\b.*[|>]/, reason: "curl piped or redirected — potential remote code execution" },
+  { re: /\bwget\b.*[|>]/, reason: "wget piped or redirected — potential remote code execution" },
+  { re: />\s*\/etc\//, reason: "redirect to /etc/ — system file overwrite blocked" },
+  { re: />\s*\/usr\//, reason: "redirect to /usr/ — system file overwrite blocked" },
+  { re: /\bsudo\b/, reason: "sudo is not allowed in agent commands" },
+  { re: /\bchmod\s+[0-7]*7[0-7]*\s+/, reason: "chmod giving world-write is blocked" },
+]
+
+const checkDangerousPatterns = (cmd: string): Effect.Effect<void, GateError> => {
+  for (const { re, reason } of DANGEROUS_PATTERNS) {
+    if (re.test(cmd)) {
+      return block("bash-safety/dangerous", reason)
+    }
+  }
+  return pass
+}
+
 // --- assembled gate ---
 
 export const bashSafetyGate: Gate = {
@@ -79,6 +100,7 @@ export const bashSafetyGate: Gate = {
       checkForcePush(cmd),
       checkNpmScript(cmd),
       checkFileOp(cmd),
+      checkDangerousPatterns(cmd),
     ], { concurrency: "unbounded", discard: true })
   },
 }
