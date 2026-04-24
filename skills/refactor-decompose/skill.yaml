@@ -27,10 +27,11 @@ states:
       Target: {{inputs.target}}
 
       Steps:
-      1. Use grep to find function/class/const declarations
-      2. Use read_lines to read relevant sections
-      3. Group declarations into logical modules (commands/, utils/, types/)
-      4. Verify each group would be < 150 lines
+      1. bash("grep -n 'export\|^const \|^async function\|^function\|^class\|^if (cmd' {{inputs.target}}") — get all declaration line numbers
+      2. bash("wc -l {{inputs.target}}") — confirm total lines
+      3. From the grep output ONLY (no read_lines), group declarations into modules
+      4. Estimate lines per group from the line number gaps
+      DO NOT use read_lines or read — grep output is sufficient for the decomposition plan.
 
       Respond with a JSON code block:
       ```json
@@ -53,7 +54,7 @@ states:
     on_error: hitl
     max_retries: 2
     hitl_pause: true
-    budget_tokens: 60000
+    budget_tokens: 150000
 
   implement:
     description: |
