@@ -71,6 +71,23 @@ const checkFileOp = (cmd: string): Effect.Effect<void, GateError> => {
 // --- dangerous redirect/pipe patterns (from claw-code allowlist) ---
 // Block shell redirects that could overwrite system files or inject data
 
+// Files that are large and should never be cat'd directly
+const LARGE_FILE_EXTENSIONS = /\.(ts|tsx|js|jsx|py|rs|go|java|c|cpp|h)$/
+
+const checkCatLargeFile = (cmd: string): Effect.Effect<void, GateError> => {
+  const catMatch = /\bcat\s+(\S+)/.exec(cmd)
+  if (!catMatch) return pass
+  const path = catMatch[1]!
+  if (LARGE_FILE_EXTENSIONS.test(path)) {
+    return block(
+      "bash-safety/cat-large",
+      `cat ${path} is blocked — use execute_code with readFile() or readLines() instead.\n` +
+      `Example: execute_code('const c = await readFile("${path}"); console.log(c)')`
+    )
+  }
+  return pass
+}
+
 const DANGEROUS_PATTERNS: Array<{ re: RegExp; reason: string }> = [
   { re: /\bcurl\b.*[|>]/, reason: "curl piped or redirected — potential remote code execution" },
   { re: /\bwget\b.*[|>]/, reason: "wget piped or redirected — potential remote code execution" },
@@ -101,6 +118,7 @@ export const bashSafetyGate: Gate = {
       checkNpmScript(cmd),
       checkFileOp(cmd),
       checkDangerousPatterns(cmd),
+      checkCatLargeFile(cmd),
     ], { concurrency: "unbounded", discard: true })
   },
 }

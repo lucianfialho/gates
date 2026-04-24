@@ -182,11 +182,20 @@ export const run = (
     const usageRef = yield* Ref.make({ input_tokens: 0, output_tokens: 0 })
 
     let done = false
+    let rounds = 0
+    const MAX_ROUNDS = 30  // hard stop — agent must produce end_turn within 30 tool-call rounds
 
     yield* Effect.whileLoop({
-      while: () => !done,
+      while: () => !done && rounds < MAX_ROUNDS,
       body: () =>
         Effect.gen(function* () {
+          rounds++
+          if (rounds >= MAX_ROUNDS) {
+            done = true
+            console.error(`[loop] MAX_ROUNDS=${MAX_ROUNDS} reached — forcing end_turn`)
+            yield* Ref.set(resultRef, "[MAX_ROUNDS reached — agent did not produce end_turn within limit]")
+            return
+          }
           const rawMessages = yield* Ref.get(messagesRef)
           const messages = elideStaleReads(rawMessages)
 
