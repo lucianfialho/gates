@@ -1,57 +1,9 @@
 #!/usr/bin/env bun
-import { readFile, access } from "node:fs/promises"
-import { join } from "node:path"
-import { load } from "js-yaml"
-import { loadGatesConfig } from "../config/GatesConfig.js"
+import { Effect } from "effect"
+import { runDoctorEffect, type DoctorContext } from "./doctor.internal.js"
 
-interface SummaryYaml {
-  status?: string
-  [key: string]: unknown
-}
-
-interface DirHealth {
-  dir: string
-  summary_exists: boolean
-  status: string | null
-  healthy: boolean
-}
-
-const SUMMARY_STUB_STATUS = "stub"
-
-const fileExists = async (path: string): Promise<boolean> => {
-  try {
-    await access(path)
-    return true
-  } catch {
-    return false
-  }
-}
-
-const checkDirHealth = async (cwd: string, dirPath: string): Promise<DirHealth> => {
-  const summaryPath = join(cwd, dirPath, ".metadata", "summary.yaml")
-  const exists = await fileExists(summaryPath)
-
-  if (!exists) {
-    return { dir: dirPath, summary_exists: false, status: null, healthy: false }
-  }
-
-  try {
-    const raw = await readFile(summaryPath, "utf-8")
-    const data = load(raw) as SummaryYaml
-    const status = data?.status ?? SUMMARY_STUB_STATUS
-    return { dir: dirPath, summary_exists: true, status, healthy: status === "filled" }
-  } catch {
-    return { dir: dirPath, summary_exists: true, status: null, healthy: false }
-  }
-}
-
-export async function runDoctor(rawArgs: string[]): Promise<void> {
-  const outputJson = rawArgs.includes("--json")
-  const cwd = process.cwd()
-
-  // 1. Check if .gates/config.yaml exists
-  const configPath = join(cwd, ".gates", "config.yaml")
-  const configExists = await fileExists(configPath)
+const renderDoctor = (ctx: DoctorContext, outputJson: boolean): void => {
+  const { configExists, indexedDirs, dirHealthList, contextExists, gateCount } = ctx
 
   if (!configExists) {
     if (outputJson) {
@@ -60,41 +12,28 @@ export async function runDoctor(rawArgs: string[]): Promise<void> {
         indexed_count: 0,
         indexed_dirs: [],
         context_exists: false,
+        gate_count: gateCount,
       }))
     } else {
       console.log("❌ .gates/config.yaml not found")
       console.log("   Run: gates auth to initialize")
+      console.log(`\nregistered gates: ${gateCount}`)
     }
     return
   }
 
-  // 2. Load config and read indexed_directories
-  const config = await loadGatesConfig()
-  const indexedDirs = config.indexed_directories ?? []
-
-  // 3. Check each indexed directory for .metadata/summary.yaml
-  const dirHealthList: DirHealth[] = []
-  for (const entry of indexedDirs) {
-    const health = await checkDirHealth(cwd, entry.path)
-    dirHealthList.push(health)
-  }
-
-  // 4. Compute overall context_exists (all dirs healthy = context is intact)
-  const allHealthy = dirHealthList.length > 0 && dirHealthList.every(h => h.healthy)
-  const contextExists = configExists && allHealthy
-
   if (outputJson) {
-    const output = {
+    const output: Record<string, unknown> = {
       config_exists: true,
       indexed_count: indexedDirs.length,
       indexed_dirs: indexedDirs.map(e => e.path),
       context_exists: contextExists,
+      gate_count: gateCount,
     }
-    // Append per-dir health fields
     for (const h of dirHealthList) {
-      ;(output as Record<string, unknown>)[`${h.dir}_summary_exists`] = h.summary_exists
-      ;(output as Record<string, unknown>)[`${h.dir}_status`] = h.status
-      ;(output as Record<string, unknown>)[`${h.dir}_healthy`] = h.healthy
+      output[`${h.dir}_summary_exists`] = h.summary_exists
+      output[`${h.dir}_status`] = h.status
+      output[`${h.dir}_healthy`] = h.healthy
     }
     console.log(JSON.stringify(output))
     return
@@ -105,6 +44,9 @@ export async function runDoctor(rawArgs: string[]): Promise<void> {
 
   // Config status
   console.log(`config:      ${configExists ? "✓ found" : "✗ missing"}`)
+
+  // Registered gates
+  console.log(`gates:       ${gateCount} registered`)
 
   // Indexed directories
   console.log(`indexed:     ${indexedDirs.length} dir(s)`)
@@ -137,4 +79,13 @@ export async function runDoctor(rawArgs: string[]): Promise<void> {
       }
     }
   }
+}
+
+export async function runDoctor(rawArgs: string[]): Promise<void> {
+  const outputJson = rawArgs.includes("--json")
+  const cwd = process.cwd()
+
+  const ctx = await Effect.runPromise(runDoctorEffect(cwd, outputJson))
+
+  renderDoctor(ctx, outputJson)
 }

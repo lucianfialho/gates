@@ -15,6 +15,15 @@ import { issueReadGuardGate } from "./IssueReadGuard.js"
 import type { GatesConfig } from "../config/GatesConfig.js"
 import type { ProjectContext } from "../context/ProjectContext.js"
 
+// Static gate list — used by doctor command without needing AppLayer
+export const BUILTIN_GATE_NAMES = [
+  "bash-safety", "metadata", "context-scope", "read-large",
+  "read-dedup", "verify-readonly", "write-large", "workspace-boundary",
+  "manifest-boundary", "issue-read-guard",
+] as const
+
+export const getBuiltinGateCount = (): number => BUILTIN_GATE_NAMES.length
+
 // ---------------------------------------------------------------------------
 // Layer
 // ---------------------------------------------------------------------------

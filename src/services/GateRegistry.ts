@@ -4,6 +4,7 @@ import type { Gate, GateError, ToolCall } from "../gates/Gate.js"
 export interface GateRegistryShape {
   readonly register: (gate: Gate) => void
   readonly enforce: (call: ToolCall) => Effect.Effect<void, GateError>
+  readonly getRegisteredCount: () => number
 }
 
 export class GateRegistry extends Context.Service<GateRegistry, GateRegistryShape>()(
@@ -19,6 +20,7 @@ const makeImpl = (): GateRegistryShape => {
       if (!matching.length) return Effect.succeed(undefined)
       return Effect.forEach(matching, (g) => g.check(call), { concurrency: 1, discard: true })
     },
+    getRegisteredCount: () => gates.length,
   }
 }
 
