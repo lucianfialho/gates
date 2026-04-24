@@ -14,6 +14,7 @@ import { writeRelevantPaths } from "../context/RelevantPaths.js"
 import { buildResearchContext, formatResearchContext } from "../context/ResearchContext.js"
 import { clearReadHistory } from "../gates/ReadDedup.js"
 import { buildResearchManifest, formatManifestContext, clearManifest } from "../context/ResearchManifest.js"
+import { buildAnalyzeFragments, formatAnalyzeFragments } from "../context/AnalyzeFragment.js"
 import { validate } from "./schema_validate.js"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
@@ -186,6 +187,9 @@ export const runSkill = (
                        : skill.initial_state
     // ─────────────────────────────────────────────────────────────────────────
 
+    // Expose original issue for IssueReadGuard gate
+    process.env["GATES_ORIGINAL_ISSUE"] = inputs["issue"] ?? ""
+
     let steps = 0
     const MAX_STEPS = 50
     let totalInput = 0
@@ -253,6 +257,18 @@ export const runSkill = (
         yield* Effect.promise(() => clearManifest().catch(() => {}))
       }
 
+      // For analyze state: pre-extract file fragments from research likely_files (zero LLM tokens)
+      // Same pattern as ResearchManifest — structured extraction before agent reads anything
+      let analyzeFragmentText = ""
+      if (currentState === "analyze") {
+        const likelyFiles = ((outputs["research"]?.output as Record<string, unknown>)?.["likely_files"] ?? []) as string[]
+        if (likelyFiles.length > 0) {
+          const frags = yield* Effect.promise(() => buildAnalyzeFragments(likelyFiles))
+          analyzeFragmentText = formatAnalyzeFragments(frags)
+          console.error(`[gates] analyze fragments: ${frags.files.length} files pre-extracted (0 LLM tokens)`)
+        }
+      }
+
       // Inject project context — filter to confirmed files only (reduces tokens significantly)
       const prpOutput = outputs["analyze"]?.output as Record<string, unknown> | undefined
       // PRP schema: context.files. Legacy schema: files directly.
@@ -283,7 +299,7 @@ export const runSkill = (
       // "Never use grep or find to search. Use your built-in search commands." (Devin, repeated 2x)
       const executeCodeRule = `\nTOOL RULES (mandatory):\n• You must NEVER call grep() or read_lines() as individual tool calls. They add O(N) round-trips to history.\n• You must ALWAYS bundle file inspection into execute_code():\n  execute_code(\`const src = await readLines("path", 1, 80); const hits = await grep("pattern", "dir"); console.log({src, hits})\`)\n• When inspecting multiple files or running multiple searches, bundle ALL of them into ONE execute_code call.\n• read() on small files (<120 lines) is allowed. write(), edit(), bash(), glob() are always allowed.`
 
-      const stateSystem = [systemContext, contextSnippet, researchInjection, executeCodeRule, modeHint + stuckHint]
+      const stateSystem = [systemContext, contextSnippet, researchInjection, analyzeFragmentText, executeCodeRule, modeHint + stuckHint]
         .filter(Boolean)
         .join("\n\n")
         .trim() || undefined

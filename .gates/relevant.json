@@ -1,4 +1,5 @@
 [
   "src/services/providers/Anthropic.ts",
-  "src/services/providers/OpenAI.ts"
+  "src/services/providers/OpenAI.ts",
+  "src/services/LLM.ts"
 ]
