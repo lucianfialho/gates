@@ -14,9 +14,30 @@ import { runGateway } from "./commands/gateway.js"
 
 // ─── CLI routing ──────────────────────────────────────────────────────────────
 
-const [cmd, ...rest] = process.argv.slice(2)
-const verbose = rest.includes("--verbose") || rest.includes("-v")
 const rawArgs = process.argv.slice(2)
+const filteredArgs = rawArgs.filter(a => a !== "--verbose" && a !== "-v")
+const verbose = rawArgs.includes("--verbose") || rawArgs.includes("-v")
+const [cmd, ...rest] = filteredArgs
+
+const USAGE = `
+gates — autonomous coding agent
+
+USAGE
+  gates [--verbose] <prompt>                        run the agent with a direct prompt
+  gates [--verbose] <skill> "<description>"         run a skill
+  gates [--verbose] run <skill.yaml> [key=value .]  run a skill by path
+  gates chat                                        interactive TUI
+  gates simulate <skill.yaml> [key=value .]         trace skill flow without LLM calls
+  gates stats                                       token usage and cost per run
+  gates stats --json                                JSON output
+  gates logs                                        list last 10 runs
+  gates logs <runId>                                full event timeline for a run
+  gates resume <run-id>                             resume a failed skill run
+  gates auth set <key>                              save API key
+  gates auth show                                   show stored key (masked)
+  gates auth remove                                 delete stored key
+  gates help                                        show this message
+`.trim()
 
 async function main() {
   switch (cmd) {
@@ -32,7 +53,6 @@ async function main() {
 
     case "logs": {
       const [first] = rest
-      // If the first token looks like a run ID (hex or uuid), treat as run-specific log
       const runId = /^[a-f0-9-]{8,}/i.test(first ?? "") ? first : undefined
       await runLogs(runId)
       break
@@ -48,27 +68,67 @@ async function main() {
       break
     }
 
-    case "gateway": {
-      const [gatewayPrompt] = rest
-      await runGateway(gatewayPrompt ?? "", undefined, verbose)
+    case "chat": {
+      const { startChat } = await import("./chat/index.js")
+      const { readFile } = await import("node:fs/promises")
+      const { Layer } = await import("effect")
+      const { LLMLayer } = await import("./services/LLM.js")
+      const { GateRegistryLayer } = await import("./services/GateRegistry.js")
+      const { ToolRegistryLayer } = await import("./services/Tools.js")
+      const { BuiltinGatesLayer } = await import("./gates/builtin.js")
+      const { PersistenceLayer } = await import("./machine/Persistence.js")
+      const { GatewayServiceLive } = await import("./machine/Gateway.js")
+      const AppLayer = Layer.mergeAll(
+        LLMLayer,
+        GateRegistryLayer,
+        ToolRegistryLayer,
+        PersistenceLayer,
+        BuiltinGatesLayer.pipe(Layer.provide(GateRegistryLayer)),
+        GatewayServiceLive.pipe(Layer.provide(LLMLayer))
+      )
+      let systemPrompt: string | undefined
+      try {
+        const claude = await readFile("CLAUDE.md", "utf-8")
+        systemPrompt = `You are an autonomous coding agent. Here is the project context:\n\n${claude}\n\nCurrent working directory: ${process.cwd()}`
+      } catch { /* no CLAUDE.md */ }
+      await startChat(AppLayer as never, systemPrompt)
+      break
+    }
+
+    case "simulate": {
+      const { simulate } = await import("./machine/Simulate.js")
+      const { resolve } = await import("node:path")
+      const [skillPath, ...kvArgs] = rest
+      if (!skillPath) { console.error("Usage: gates simulate <skill.yaml> [key=value ...]"); process.exit(1) }
+      await simulate(resolve(skillPath), Object.fromEntries(kvArgs.flatMap(a => { const i = a.indexOf("="); return i > 0 ? [[a.slice(0, i), a.slice(i + 1)]] : [] })))
+      break
+    }
+
+    case "help":
+    case "--help":
+    case "-h": {
+      console.log(USAGE)
       break
     }
 
     default: {
-      // Skill shortcut: gates <token> [inputs...]  →  gates run skills/<token>/skill.yaml inputs...
+      if (!cmd) {
+        console.log(USAGE)
+        process.exit(1)
+      }
+
+      // Skill shortcut: gates <token> → skills/<token>/skill.yaml
       const fs = await import("node:fs/promises")
-      const skillPath = join(process.cwd(), "skills", cmd ?? "", "skill.yaml")
-      try {
-        await fs.access(skillPath)
-      } catch {
-        console.error("Usage:\n  gates <prompt>              Run an agent with a prompt\n  gates auth <sub>             Manage API keys\n  gates stats [--json]          Show run statistics\n  gates logs [run-id]          View run logs\n  gates resume <run-id>         Resume a failed run\n  gates run <skill.yaml>        Run a skill\n  gates gateway <prompt>        Run via gateway classifier")
-        process.exit(1)
+      const skillPath = join(process.cwd(), "skills", cmd, "skill.yaml")
+      const isSkill = await fs.access(skillPath).then(() => true).catch(() => false)
+      if (isSkill) {
+        await runSkillShortcut(cmd, rest, verbose)
+        break
       }
-      const handled = await runSkillShortcut(cmd ?? "", rest, verbose)
-      if (!handled) {
-        console.error(`Error: skill not found at ${skillPath}`)
-        process.exit(1)
-      }
+
+      // Direct prompt — route through gateway
+      const prompt = [cmd, ...rest].join(" ")
+      await runGateway(prompt, undefined, verbose)
       break
     }
   }
