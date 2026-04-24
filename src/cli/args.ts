@@ -4,16 +4,15 @@
  */
 import { join } from "node:path"
 
+// Static imports for filesystem-only commands (no LLMService needed)
 import { runAuth } from "../commands/auth.js"
 import { runStats } from "../commands/stats.js"
 import { runLogs } from "../commands/logs.js"
 import { runClean } from "../commands/clean.js"
-import { runResume } from "../commands/resume.js"
-import { runSkillShortcut, runSkillByPath } from "../commands/skill.js"
-import { runGateway } from "../commands/gateway.js"
-import { startChatTUI } from "../commands/chat.js"
 import { runVersion } from "../commands/version.js"
 import { runDoctor } from "../commands/doctor.js"
+// LLM-dependent commands are lazy-imported to avoid LLMService initialization
+// for simple filesystem commands (stats, logs, version, doctor, etc.)
 
 const rawArgs = process.argv.slice(2)
 const filteredArgs = rawArgs.filter(a => a !== "--verbose" && a !== "-v")
@@ -46,16 +45,19 @@ export async function routeCommand() {
     }
 
     case "resume": {
+      const { runResume } = await import("../commands/resume.js")
       await runResume(rest[0] ?? "", verbose)
       break
     }
 
     case "run": {
+      const { runSkillByPath } = await import("../commands/skill.js")
       await runSkillByPath(rest[0] ?? "", rest.slice(1), verbose)
       break
     }
 
     case "chat": {
+      const { startChatTUI } = await import("../commands/chat.js")
       await startChatTUI()
       break
     }
@@ -91,7 +93,8 @@ export async function routeCommand() {
 
     default: {
       if (!cmd) {
-        // No args → open TUI (default mode)
+        // No args → open TUI (default mode, lazy — needs LLMService)
+        const { startChatTUI } = await import("../commands/chat.js")
         await startChatTUI()
         break
       }
@@ -101,11 +104,13 @@ export async function routeCommand() {
       const skillPath = join(process.cwd(), "skills", cmd, "skill.yaml")
       const isSkill = await fs.access(skillPath).then(() => true).catch(() => false)
       if (isSkill) {
+        const { runSkillShortcut } = await import("../commands/skill.js")
         await runSkillShortcut(cmd, rest, verbose)
         break
       }
 
-      // Direct prompt — route through gateway
+      // Direct prompt — route through gateway (lazy import — needs LLMService)
+      const { runGateway } = await import("../commands/gateway.js")
       const prompt = [cmd, ...rest].join(" ")
       await runGateway(prompt, undefined, verbose)
       break
