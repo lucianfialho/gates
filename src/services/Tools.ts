@@ -288,6 +288,104 @@ const gh_pr_create: ToolHandler = (id, input) =>
     catch: (e) => new ToolError("gh_pr_create", e),
   })
 
+// execute_code — agent writes JavaScript, executed in a sandboxed context
+// with all tools injected as async functions. console.log output is returned.
+// Solves O(N²) message history growth: multiple operations in one round.
+// eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (...args: string[]) => Function
+
+const BLOCKED_CODE_PATTERNS = [
+  /\brequire\s*\(/,
+  /\bimport\s*\(/,
+  /__proto__/,
+  /process\.env/,
+  /process\.exit/,
+  /\beval\s*\(/,
+  /new\s+Function\s*\(/,
+]
+
+const execute_code: ToolHandler = (id, input) =>
+  Effect.tryPromise({
+    try: async () => {
+      const { code } = input as { code: string }
+
+      // Safety check before execution
+      for (const pattern of BLOCKED_CODE_PATTERNS) {
+        if (pattern.test(code)) {
+          return { id, content: `[BLOCKED by code-safety]: pattern "${pattern.source}" is not allowed` }
+        }
+      }
+
+      const output: string[] = []
+      const fakeConsole = {
+        log: (...args: unknown[]) =>
+          output.push(args.map(a => typeof a === "object" ? JSON.stringify(a, null, 2) : String(a)).join(" ")),
+        error: (...args: unknown[]) =>
+          output.push("[error] " + args.join(" ")),
+        warn: (...args: unknown[]) =>
+          output.push("[warn] " + args.join(" ")),
+      }
+
+      // Toolkit: simple async wrappers over the underlying implementations
+      const toolkit = {
+        readFile: async (path: string): Promise<string> => {
+          const content = await readFile(path, "utf-8")
+          return content.length > 50_000 ? content.slice(0, 50_000) + "\n[truncated]" : content
+        },
+        readLines: async (path: string, start: number, end: number): Promise<string> => {
+          const content = await readFile(path, "utf-8")
+          const lines = content.split("\n")
+          return lines.slice(start - 1, end).map((l, i) => `${start + i}: ${l}`).join("\n")
+        },
+        writeFile: async (path: string, content: string): Promise<string> => {
+          await writeFile(path, content, "utf-8")
+          return `Written: ${path}`
+        },
+        appendFile: async (path: string, content: string): Promise<string> => {
+          await appendFile(path, content, "utf-8")
+          return `Appended to: ${path}`
+        },
+        grep: async (pattern: string, path: string): Promise<string> => {
+          try {
+            const { stdout } = await execFileAsync("grep", ["-rn", pattern, path], { timeout: 10_000 })
+              .catch((e: { stdout?: string; code?: number }) => e.code === 1 ? { stdout: "" } : Promise.reject(e))
+            const lines = (stdout as string).trim().split("\n").slice(0, 150)
+            return lines.join("\n") || "(no matches)"
+          } catch { return "(error)" }
+        },
+        glob: async (pattern: string, cwd?: string): Promise<string> => {
+          const matches: string[] = []
+          for await (const f of fsGlob(pattern, { cwd: cwd ?? "." })) matches.push(f)
+          return matches.sort().join("\n") || "(no matches)"
+        },
+        bash: async (command: string): Promise<string> => {
+          return new Promise((resolve) => {
+            const child = spawn("sh", ["-c", command], { stdio: ["ignore", "pipe", "pipe"] })
+            let out = ""
+            child.stdout?.on("data", (d) => { out += d.toString() })
+            child.stderr?.on("data", (d) => { out += d.toString() })
+            child.on("close", () => resolve(out.length > 10_000 ? out.slice(0, 10_000) + "\n[truncated]" : out))
+          })
+        },
+      }
+
+      // Build and execute the sandboxed async function
+      const fn = new AsyncFunction(
+        "tools", "console",
+        `const { readFile, readLines, writeFile, appendFile, grep, glob, bash } = tools;\n${code}`
+      )
+
+      try {
+        await fn(toolkit, fakeConsole)
+      } catch (e) {
+        output.push(`[runtime error] ${e instanceof Error ? e.message : String(e)}`)
+      }
+
+      return { id, content: output.join("\n") || "(no output — use console.log to return results)" }
+    },
+    catch: (e) => new ToolError("execute_code", e),
+  })
+
 // Mode switch — agent signals intent to change execution mode.
 // Sets GATES_ACTIVE_MODE env var; Runner injects updated system prompt on next round.
 const VALID_MODES = ["ProRN", "LEARN", "PATCH", "STANDARD", "REFACTOR"] as const
@@ -321,6 +419,7 @@ const handlers = new Map<string, ToolHandler>([
   ["gh_issue_create", gh_issue_create],
   ["gh_pr_create", gh_pr_create],
   ["mode_switch", mode_switch],
+  ["execute_code", execute_code],
 ])
 
 const definitions: ToolDef[] = [
@@ -492,6 +591,34 @@ const definitions: ToolDef[] = [
         base: { type: "string", description: "Base branch. Defaults to main." },
       },
       required: ["title", "body"],
+    },
+  },
+  {
+    name: "execute_code",
+    description: `Execute JavaScript code in a sandboxed context. PREFER this over multiple individual tool calls when you need to read several files, run multiple greps, or chain operations — it reduces context window usage dramatically.
+
+Available functions inside the code (all async):
+  readFile(path: string): Promise<string>
+  readLines(path: string, start: number, end: number): Promise<string>
+  writeFile(path: string, content: string): Promise<string>
+  appendFile(path: string, content: string): Promise<string>
+  grep(pattern: string, path: string): Promise<string>
+  glob(pattern: string, cwd?: string): Promise<string>
+  bash(command: string): Promise<string>
+
+Use console.log() to return results. Example:
+  const content = await readLines("src/cli/args.ts", 1, 30)
+  const exports = await grep("export", "src/cli/args.ts")
+  console.log(JSON.stringify({ content, exports }))`,
+    input_schema: {
+      type: "object",
+      properties: {
+        code: {
+          type: "string",
+          description: "Async JavaScript code to execute. Use console.log() to return results.",
+        },
+      },
+      required: ["code"],
     },
   },
   {
