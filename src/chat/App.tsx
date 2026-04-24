@@ -95,6 +95,11 @@ const classifyExplicit = (text: string): Intent | null => {
   if (t === "@read"     || t.startsWith("@read "))     return { type: "mode-switch", mode: "read" }
   if (t === "@patch"    || t.startsWith("@patch "))    return { type: "mode-switch", mode: "patch" }
   if (t === "@standard" || t.startsWith("@standard ")) return { type: "mode-switch", mode: "standard" }
+  if (t === "@refactor" || t.startsWith("@refactor ")) {
+    const arg = t.replace(/^@refactor\s*/i, "").trim()
+    if (!arg) return { type: "freeform", arg: "Usage: @refactor split <file>\nExample: @refactor split src/index.ts" }
+    return { type: "skill", skillName: "refactor-decompose" as any, arg }
+  }
   // Explicit skill triggers
   if (/^\/s\s+/i.test(t))           return { type: "skill", skillName: "solve-issue", arg: t.replace(/^\/s\s+/i, "") }
   if (/^\/solve\s+/i.test(t))       return { type: "skill", skillName: "solve-issue", arg: t.replace(/^\/solve\s+/i, "") }

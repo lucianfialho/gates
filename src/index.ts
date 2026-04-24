@@ -581,6 +581,10 @@ EXAMPLES
       }
 
       case "REFACTOR": {
+        if (!decision.intent.trim()) {
+          console.log("Usage: @refactor split <file>\nExample: @refactor split src/index.ts")
+          break
+        }
         // Decompose large file — use refactor-decompose skill if available
         const refactorSkill = join(skillsDir, "refactor-decompose", "skill.yaml")
         const hasRefactorSkill = yield* Effect.promise(() => access(refactorSkill).then(() => true).catch(() => false))
