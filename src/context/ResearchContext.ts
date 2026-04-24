@@ -5,6 +5,7 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { load } from "js-yaml"
 import { loadGatesConfig, type IndexedDirectory } from "../config/GatesConfig.js"
+import { findRelevantPRPs, formatPRPContext } from "./PRPIndex.js"
 
 const execFileAsync = promisify(execFile)
 
@@ -29,6 +30,7 @@ export interface RelatedIssue {
 export interface ResearchContext {
   summaries: MetadataSummary[]
   related: RelatedIssue[]
+  prpMatches: import("./PRPIndex.js").PRPEntry[]
   built_at: string
 }
 
@@ -131,9 +133,13 @@ export const buildResearchContext = (issue: string): Effect.Effect<ResearchConte
     const summaries = scored.filter((x, i) => i < 3 || x.score > 0).map(x => x.s)
 
     // Search GitHub for related issues in parallel
-    const related = yield* searchRelatedIssues(issue)
+    // Also load PRPs from .prp/ — MemCoder-style memory retrieval (zero LLM tokens)
+    const [related, prpMatches] = yield* Effect.all([
+      searchRelatedIssues(issue),
+      Effect.promise(() => findRelevantPRPs(issue)),
+    ])
 
-    return { summaries, related, built_at: new Date().toISOString() }
+    return { summaries, related, prpMatches, built_at: new Date().toISOString() }
   })
 
 // ── prompt formatter ──────────────────────────────────────────────────────────
@@ -159,6 +165,11 @@ export const formatResearchContext = (ctx: ResearchContext): string => {
       lines.push(`#${r.number} [${r.state}] ${r.title}`)
       if (r.body) lines.push(`  ${r.body.replace(/\n/g, " ").slice(0, MAX_ISSUE_BODY)}`)
     }
+  }
+
+  // MemCoder memory: inject relevant PRPs before agent reads any files
+  if (ctx.prpMatches?.length > 0) {
+    lines.push(formatPRPContext(ctx.prpMatches))
   }
 
   return lines.join("\n")
