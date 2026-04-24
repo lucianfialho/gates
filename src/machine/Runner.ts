@@ -190,6 +190,7 @@ export const runSkill = (
     let totalInput = 0
     let totalOutput = 0
     let retryCount = 0
+    let stateTokensTotal = 0   // cumulative tokens for the current state
 
     const nonTerminalStates = Object.entries(skill.states)
       .filter(([, s]) => !s.terminal).length
@@ -202,8 +203,9 @@ export const runSkill = (
 
       if (stateDef.terminal) break
 
-      // Reset read-dedup history so each state starts fresh
+      // Reset read-dedup history and per-state token counter
       clearReadHistory()
+      stateTokensTotal = 0
 
       // Expose current state to gates (e.g. VerifyReadOnly blocks writes in verify)
       process.env["GATES_ACTIVE_STATE"] = currentState
@@ -347,24 +349,24 @@ export const runSkill = (
       retryCount = 0
       totalInput += usage.input_tokens
       totalOutput += usage.output_tokens
+      stateTokensTotal += usage.input_tokens + usage.output_tokens
 
-      // Budget gate — enforce token limit per state
+      // Budget gate — enforce cumulative token limit for this state
       if (stateDef.budget_tokens) {
-        const stateTokens = usage.input_tokens + usage.output_tokens
-        const pct = Math.round((stateTokens / stateDef.budget_tokens) * 100)
-        if (stateTokens > stateDef.budget_tokens) {
-          const msg = `Budget exceeded in "${currentState}": ${stateTokens.toLocaleString()} tokens used, budget was ${stateDef.budget_tokens.toLocaleString()}`
+        const pct = Math.round((stateTokensTotal / stateDef.budget_tokens) * 100)
+        if (stateTokensTotal > stateDef.budget_tokens) {
+          const msg = `Budget exceeded in "${currentState}": ${stateTokensTotal.toLocaleString()} tokens used (cumulative), budget was ${stateDef.budget_tokens.toLocaleString()}`
           console.error(`[gates] ⚠ ${msg}`)
           onEvent?.({ type: "gate_block", gate: "budget", reason: msg })
           const policy = stateDef.on_error ?? "abort"
           if (policy === "hitl" && onHITL) {
-            const approved = yield* Effect.promise(() => onHITL(currentState, { budget_exceeded: stateTokens, budget: stateDef.budget_tokens }, true))
+            const approved = yield* Effect.promise(() => onHITL(currentState, { budget_exceeded: stateTokensTotal, budget: stateDef.budget_tokens }, true))
             if (!approved) return yield* Effect.fail(new RunnerError(msg))
           } else if (policy !== "skip") {
             return yield* Effect.fail(new RunnerError(msg))
           }
         } else if (pct >= 80) {
-          console.error(`[gates] ⚠ budget warning: "${currentState}" at ${pct}% (${stateTokens.toLocaleString()}/${stateDef.budget_tokens.toLocaleString()})`)
+          console.error(`[gates] ⚠ budget warning: "${currentState}" at ${pct}% (${stateTokensTotal.toLocaleString()}/${stateDef.budget_tokens.toLocaleString()})`)
           onEvent?.({ type: "gate_block", gate: "budget-warning", reason: `${currentState} at ${pct}% of token budget` })
         }
       }
