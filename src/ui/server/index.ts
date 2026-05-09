@@ -537,9 +537,26 @@ export function createServer(harnesses: LoadedHarness[]) {
           harnessConfig.roles?.find((r) => r.name === activeRole)?.systemPrompt ??
           harnessConfig.systemPrompt ?? "You are a helpful assistant.";
 
-        // Set up sandbox + tools (only those declared in harness config)
+        // Set up sandbox + tools + connectors
         const sandbox = await Effect.runPromise(makeLocalSandbox({ cwd: process.cwd() }));
         const allTools = toolsMap(sandbox);
+
+        // Load connector tools (gws_meet, gws_calendar, gh, etc.)
+        try {
+          const { loadConnectors } = await import("@gatesai/skills");
+          const connectorDir = `${process.cwd()}/.gates/connectors`;
+          const savedK = readSavedKeys();
+          const registry = await Effect.runPromise(
+            loadConnectors(connectorDir, {
+              GH_TOKEN: process.env.GH_TOKEN ?? savedK["github"] ?? "",
+              GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE:
+                process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ?? savedK["google-workspace"] ?? "",
+            })
+          );
+          for (const [name, tool] of registry.allTools()) {
+            allTools.set(name, tool);
+          }
+        } catch { /* connectors optional */ }
 
         // Built-in fetch_url tool — always available
         allTools.set("fetch_url", {
@@ -564,15 +581,18 @@ export function createServer(harnesses: LoadedHarness[]) {
         });
 
         const declaredToolNames = harnessConfig.tools ?? [];
+        const isDefaultSession = meta.harnessName === "__default__";
 
-        const providerTools: ProviderTool[] = [
-          ...declaredToolNames.flatMap((name) => {
-            const t = allTools.get(name);
-            return t ? [{ name: t.name, description: t.description, parameters: t.parameters }] : [];
-          }),
-          // fetch_url always included
-          { name: "fetch_url", description: "Fetch the content of a URL", parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] } },
-        ];
+        // Default sessions get ALL available tools (sandbox + connectors)
+        // Named harnesses only get tools they declared
+        const toolsToExpose = isDefaultSession
+          ? [...allTools.keys()]
+          : [...declaredToolNames, "fetch_url"];
+
+        const providerTools: ProviderTool[] = toolsToExpose.flatMap((name) => {
+          const t = allTools.get(name);
+          return t ? [{ name: t.name, description: t.description, parameters: t.parameters }] : [];
+        });
 
         // Initial message list
         const currentMessages: ProviderMessage[] = [
