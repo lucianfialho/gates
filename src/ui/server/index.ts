@@ -129,7 +129,7 @@ export function createServer(harnesses: LoadedHarness[]) {
       ? (ghAuth.output.match(/Logged in to .+ account (.+?) \(/)?.[1] ?? "authenticated")
       : null;
 
-    // gws — Google Workspace CLI (may fail on older Linux due to GLIBC)
+    // gws — Google Workspace CLI (may need musl binary on older Linux)
     const gwsWhich = await check("which", ["gws"]).catch(() => ({ ok: false, output: "" }));
     let gwsInstalled = false;
     let gwsCompatible = false;
@@ -140,9 +140,45 @@ export function createServer(harnesses: LoadedHarness[]) {
     if (gwsWhich.ok) {
       gwsVersion = await check("gws", ["--version"]);
       if (gwsVersion.output.includes("GLIBC") || gwsVersion.output.includes("libc.so")) {
-        gwsInstalled = true;
-        gwsCompatible = false;
-        gwsError = "incompatible";
+        // Try to auto-fix by replacing with musl binary
+        const autoFixed = await (async () => {
+          try {
+            const { execFile: ef } = await import("child_process");
+            const { promisify: prom } = await import("util");
+            const efAsync = prom(ef);
+            // Find the gws package dir
+            const { stdout: gwsPath } = await efAsync("which", ["gws"]);
+            const { readlink } = await import("fs/promises");
+            let binPath = gwsPath.trim();
+            try { binPath = await readlink(binPath); } catch { /* not a symlink */ }
+            const pkgDir = path.dirname(path.dirname(binPath));
+            const pkgJson = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf-8")) as { version: string };
+            const version = pkgJson.version;
+            const artifact = `google-workspace-cli-x86_64-unknown-linux-musl.tar.gz`;
+            const url = `https://github.com/googleworkspace/cli/releases/download/v${version}/${artifact}`;
+            // Download and replace
+            await efAsync("bash", ["-c",
+              `curl -sL "${url}" | tar -xz -C /tmp/gws-musl-fix --strip-components=0 2>/dev/null || mkdir -p /tmp/gws-musl-fix && curl -sL "${url}" -o /tmp/gws-musl.tgz && tar -xzf /tmp/gws-musl.tgz -C /tmp/gws-musl-fix`
+            ], { timeout: 15000 });
+            await efAsync("bash", ["-c",
+              `cp /tmp/gws-musl-fix/gws "${path.join(pkgDir, "bin", "gws")}" && chmod +x "${path.join(pkgDir, "bin", "gws")}"`
+            ]);
+            return true;
+          } catch { return false; }
+        })();
+        if (autoFixed) {
+          gwsVersion = await check("gws", ["--version"]);
+        }
+        if (!gwsVersion.ok || gwsVersion.output.includes("GLIBC")) {
+          gwsInstalled = true;
+          gwsCompatible = false;
+          gwsError = "incompatible";
+        } else {
+          gwsInstalled = true;
+          gwsCompatible = true;
+          gwsAuth = await check("gws", ["auth", "status"]);
+          if (!gwsAuth.ok) gwsError = "not_authenticated";
+        }
       } else if (gwsVersion.ok) {
         gwsInstalled = true;
         gwsCompatible = true;
