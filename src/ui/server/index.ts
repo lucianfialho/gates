@@ -101,6 +101,71 @@ export function createServer(harnesses: LoadedHarness[]) {
     return c.json({ firstLaunch: isFirst });
   });
 
+  // Detect CLI tools — runs actual commands to check install + auth state
+  app.get("/api/connectors/status", async (c) => {
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
+
+    const check = async (cmd: string, args: string[]): Promise<{ ok: boolean; output: string }> => {
+      try {
+        const { stdout, stderr } = await execFileAsync(cmd, args, { timeout: 5000 });
+        return { ok: true, output: (stdout + stderr).trim() };
+      } catch (e) {
+        return { ok: false, output: String((e as { message?: string }).message ?? e) };
+      }
+    };
+
+    // gh — GitHub CLI
+    const ghWhich = await check("which", ["gh"]).catch(() => ({ ok: false, output: "" }));
+    const ghVersion = ghWhich.ok
+      ? await check("gh", ["--version"])
+      : { ok: false, output: "" };
+    const ghAuth = ghWhich.ok
+      ? await check("gh", ["auth", "status"])
+      : { ok: false, output: "" };
+
+    const ghUser = ghAuth.ok
+      ? (ghAuth.output.match(/Logged in to .+ account (.+?) \(/)?.[1] ?? "authenticated")
+      : null;
+
+    // gws — Google Workspace CLI
+    const gwsWhich = await check("which", ["gws"]).catch(() => ({ ok: false, output: "" }));
+    const gwsVersion = gwsWhich.ok
+      ? await check("gws", ["--version"])
+      : { ok: false, output: "" };
+    const gwsAuth = gwsWhich.ok
+      ? await check("gws", ["auth", "status"])
+      : { ok: false, output: "" };
+
+    return c.json({
+      connectors: [
+        {
+          id: "github",
+          label: "GitHub CLI (gh)",
+          installed: ghWhich.ok,
+          authenticated: ghAuth.ok,
+          user: ghUser,
+          version: ghWhich.ok ? ghVersion.output.split("\n")[0] : null,
+          installCmd: "brew install gh  # or: https://cli.github.com",
+          authCmd: "gh auth login",
+          description: "Create and manage GitHub issues and PRs",
+        },
+        {
+          id: "google-workspace",
+          label: "Google Workspace CLI (gws)",
+          installed: gwsWhich.ok,
+          authenticated: gwsAuth.ok,
+          user: null,
+          version: gwsWhich.ok ? gwsVersion.output.split("\n")[0] : null,
+          installCmd: "npm install -g @googleworkspace/cli",
+          authCmd: "gws auth login",
+          description: "Access Google Calendar, Meet transcripts and Drive",
+        },
+      ],
+    });
+  });
+
   // Auth status — shows all configurable items and their state
   app.get("/api/auth/status", (c) => {
     const saved = readSavedKeys();
@@ -112,24 +177,6 @@ export function createServer(harnesses: LoadedHarness[]) {
         configured: !!(process.env[`${p.toUpperCase()}_API_KEY`] ?? saved[p]),
         source: process.env[`${p.toUpperCase()}_API_KEY`] ? "env" : saved[p] ? "config" : "none",
       })),
-      connectors: [
-        {
-          id: "github",
-          label: "GitHub",
-          envVar: "GH_TOKEN",
-          configured: !!(process.env.GH_TOKEN ?? saved["github"]),
-          source: process.env.GH_TOKEN ? "env" : saved["github"] ? "config" : "none",
-          hint: "Required for creating issues. Run: gh auth login",
-        },
-        {
-          id: "google-workspace",
-          label: "Google Workspace",
-          envVar: "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE",
-          configured: !!(process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ?? saved["google-workspace"]),
-          source: process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ? "env" : saved["google-workspace"] ? "config" : "none",
-          hint: "Required for meeting transcripts. Run: gws auth login",
-        },
-      ],
     });
   });
 
