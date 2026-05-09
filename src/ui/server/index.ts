@@ -37,6 +37,77 @@ function readSavedKeys(): Record<string, string> {
   }
 }
 
+// ── Smart default harness ─────────────────────────────────────────────────────
+
+async function buildDefaultHarness(): Promise<HarnessConfig> {
+  const saved = readSavedKeys();
+
+  // Pick best available provider
+  const providerType = process.env.ANTHROPIC_API_KEY ?? saved["anthropic"] ? "anthropic"
+    : process.env.MINIMAX_API_KEY ?? saved["minimax"] ? "minimax"
+    : process.env.OPENAI_API_KEY ?? saved["openai"] ? "openai"
+    : "minimax";
+
+  // Detect configured connectors to build capabilities section
+  const { execFile: ef } = await import("child_process");
+  const { promisify } = await import("util");
+  const exec = promisify(ef);
+  const tryCmd = async (cmd: string, args: string[]) => {
+    try { await exec(cmd, args, { timeout: 3000 }); return true; } catch { return false; }
+  };
+
+  const ghReady = await tryCmd("gh", ["auth", "status"]);
+  const gwsReady = await tryCmd("gws", ["auth", "status"]);
+
+  const capabilities: string[] = [];
+
+  if (ghReady) {
+    capabilities.push(`### GitHub
+- Create issues, PRs, review code, manage repos via the gh CLI
+- Trigger when: user mentions issues, tickets, bugs, tasks, pull requests, code review
+- Examples: "create an issue for...", "what's open?", "review this PR"`);
+  }
+
+  if (gwsReady) {
+    capabilities.push(`### Google Meet & Calendar
+- List recent meetings, fetch full transcripts, get participants
+- Trigger when: user mentions meetings, standups, transcripts, "last meeting", "create tickets from meeting"
+- Full pipeline example: "create issues from today's standup" →
+    1. List conference records to find the meeting
+    2. Fetch transcript entries
+    3. Analyze and extract action items
+    4. Create a GitHub issue for each item`);
+  }
+
+  capabilities.push(`### Code & Files
+- Read, write, search, edit files in the project
+- Trigger when: user asks about code, files, implementation, debugging`);
+
+  const capSection = capabilities.length > 0
+    ? `## What you can do\n\n${capabilities.join("\n\n")}`
+    : `## What you can do\n\nYou can read, write, search and edit files in this project.`;
+
+  const systemPrompt = `You are Gates, an intelligent AI agent for your development workflow.
+
+${capSection}
+
+## How to behave
+- Act proactively — the user just tells you what they want, you figure out how
+- Never ask the user to run commands themselves
+- Never mention tool names (gh, gws_meet, etc.) — users see intent and results, not mechanics
+- For multi-step tasks, proceed autonomously and report progress conversationally
+- When you need clarification, ask exactly ONE question
+- After completing a task, summarize what was done concisely`;
+
+  return {
+    name: "Gates",
+    description: "Your AI development agent",
+    provider: { type: providerType as "anthropic" | "minimax" | "openai" },
+    systemPrompt,
+    tools: ["read", "write", "bash", "grep", "glob", "edit"],
+  };
+}
+
 // ── Provider factory ─────────────────────────────────────────────────────────
 
 function makeProvider(config: HarnessConfig): Provider {
@@ -141,6 +212,7 @@ function readModelSlots(): ModelSlot[] {
 // ── Session registry ─────────────────────────────────────────────────────────
 
 const sessions = new Map<string, { harnessName: string; createdAt: number }>();
+const defaultHarnessCache = new Map<string, HarnessConfig>(); // sessionId → default harness config
 const sse = (type: string, data: unknown): string =>
   `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
 
@@ -148,6 +220,16 @@ const sse = (type: string, data: unknown): string =>
 
 export function createServer(harnesses: LoadedHarness[]) {
   const app = new Hono();
+
+  // Default session — creates a session with the smart default harness
+  app.post("/api/default-session", async (c) => {
+    const defaultConfig = await buildDefaultHarness();
+    const sessionId = crypto.randomUUID();
+    sessions.set(sessionId, { harnessName: "__default__", createdAt: Date.now() });
+    // Store the default config so chat endpoint can use it
+    defaultHarnessCache.set(sessionId, defaultConfig);
+    return c.json({ sessionId, harnessName: defaultConfig.name });
+  });
 
   // Model configuration
   app.get("/api/config/models", (c) =>
@@ -432,13 +514,16 @@ export function createServer(harnesses: LoadedHarness[]) {
         const meta = sessions.get(sessionId);
         if (!meta) { await write("error", { message: "Session not found" }); return; }
 
-        const loaded = harnesses.find((h) => h.name === meta.harnessName);
-        if (!loaded) { await write("error", { message: "Harness not found" }); return; }
+        // Resolve harness config: use default cache for __default__ sessions
+        const harnessConfig: HarnessConfig = meta.harnessName === "__default__"
+          ? (defaultHarnessCache.get(sessionId) ?? await buildDefaultHarness())
+          : harnesses.find((h) => h.name === meta.harnessName)?.config
+            ?? await buildDefaultHarness();
 
         await write("start", { sessionId });
         await write("thinking", {});
 
-        const provider = makeProvider(loaded.config);
+        const provider = makeProvider(harnessConfig);
 
         // Load persisted history
         const store = await Effect.runPromise(makeFileSessionStore());
@@ -447,10 +532,10 @@ export function createServer(harnesses: LoadedHarness[]) {
         const history = await Effect.runPromise(SessionHistory.fromData(existing));
         const contextMessages = await Effect.runPromise(history.buildContext());
 
-        const activeRole = roleOverride ?? loaded.config.defaultRole;
+        const activeRole = roleOverride ?? harnessConfig.defaultRole;
         const systemPrompt =
-          loaded.config.roles?.find((r) => r.name === activeRole)?.systemPrompt ??
-          loaded.config.systemPrompt ?? "You are a helpful assistant.";
+          harnessConfig.roles?.find((r) => r.name === activeRole)?.systemPrompt ??
+          harnessConfig.systemPrompt ?? "You are a helpful assistant.";
 
         // Set up sandbox + tools (only those declared in harness config)
         const sandbox = await Effect.runPromise(makeLocalSandbox({ cwd: process.cwd() }));
@@ -478,7 +563,7 @@ export function createServer(harnesses: LoadedHarness[]) {
           }),
         });
 
-        const declaredToolNames = loaded.config.tools ?? [];
+        const declaredToolNames = harnessConfig.tools ?? [];
 
         const providerTools: ProviderTool[] = [
           ...declaredToolNames.flatMap((name) => {

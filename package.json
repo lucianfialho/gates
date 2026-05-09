@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@gatesai/core": "^0.1.0",
-    "@gatesai/providers": "^0.1.1",
+    "@gatesai/providers": "^0.1.2",
     "@gatesai/runtime": "^0.1.0",
     "@gatesai/sandbox": "^0.1.0",
     "@gatesai/skills": "^0.1.0",

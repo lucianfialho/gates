@@ -1,13 +1,25 @@
 import React, { useState, useEffect } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import { HarnessSelect } from "./screens/harness-select.js";
 import { Chat } from "./screens/chat.js";
+import { HarnessSelect } from "./screens/harness-select.js";
 import { SessionsList, type SessionInfo } from "./screens/sessions-list.js";
 import { ConfigScreen } from "./screens/config.js";
 import type { LoadedHarness } from "../harness/loader.js";
 import { DEFAULT_PORT } from "../server/index.js";
 
-type Screen = "checking" | "config" | "loading" | "select" | "sessions" | "chat";
+// Synthetic default harness for the TUI (display only — server builds the real one)
+const DEFAULT_HARNESS: LoadedHarness = {
+  name: "Gates",
+  dirPath: "",
+  config: {
+    name: "Gates",
+    description: "Your AI development agent",
+    provider: { type: "minimax" },
+    tools: ["read", "write", "bash", "grep", "glob", "edit"],
+  },
+};
+
+type Screen = "checking" | "config" | "loading" | "chat" | "select" | "sessions";
 
 interface Props {
   harnesses: LoadedHarness[];
@@ -16,24 +28,46 @@ interface Props {
 export function App({ harnesses }: Props) {
   const { exit } = useApp();
   const [screen, setScreen] = useState<Screen>("checking");
-  const [selectedHarness, setSelectedHarness] = useState<LoadedHarness | null>(null);
+  const [selectedHarness, setSelectedHarness] = useState<LoadedHarness>(DEFAULT_HARNESS);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Show config on first launch or if nothing is configured
+  // On startup: check config, then open chat directly
   useEffect(() => {
     Promise.all([
       fetch(`http://localhost:${DEFAULT_PORT}/api/auth/status`).then((r) => r.json()),
       fetch(`http://localhost:${DEFAULT_PORT}/api/first-launch`).then((r) => r.json()),
     ])
-      .then(([statusData, launchData]: [unknown, unknown]) => {
+      .then(async ([statusData, launchData]: [unknown, unknown]) => {
         const status = statusData as { providers: Array<{ configured: boolean }> };
         const launch = launchData as { firstLaunch: boolean };
         const anyConfigured = status.providers.some((p) => p.configured);
-        // Show config if: first launch ever, OR nothing configured at all
-        setScreen(launch.firstLaunch || !anyConfigured ? "config" : "select");
+
+        if (launch.firstLaunch || !anyConfigured) {
+          setScreen("config");
+          return;
+        }
+
+        // Go straight to chat with the default session
+        setScreen("loading");
+        try {
+          const res = await fetch(`http://localhost:${DEFAULT_PORT}/api/default-session`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+          });
+          const data = await res.json() as { sessionId?: string; harnessName?: string };
+          setSessionId(data.sessionId!);
+          // Use a named harness if available, otherwise the default
+          const namedHarness = harnesses.find((h) => h.name === data.harnessName);
+          setSelectedHarness(namedHarness ?? DEFAULT_HARNESS);
+          setScreen("chat");
+        } catch (e) {
+          setError(String(e));
+          setScreen("select");
+        }
       })
-      .catch(() => setScreen("select")); // fail open
+      .catch(() => setScreen("select"));
   }, []);
 
   useInput((input, key) => {
@@ -42,7 +76,7 @@ export function App({ harnesses }: Props) {
     }
   });
 
-  const startSession = async (harnessName: string, resumeSessionId?: string) => {
+  const startNamedSession = async (harnessName: string, resumeSessionId?: string) => {
     setScreen("loading");
     setError(null);
     try {
@@ -54,7 +88,7 @@ export function App({ harnesses }: Props) {
       });
       const data = await res.json() as { sessionId?: string; error?: string };
       if (data.error) throw new Error(data.error);
-      const harness = harnesses.find((h) => h.name === harnessName) ?? harnesses[0]!;
+      const harness = harnesses.find((h) => h.name === harnessName) ?? DEFAULT_HARNESS;
       setSelectedHarness(harness);
       setSessionId(data.sessionId!);
       setScreen("chat");
@@ -64,19 +98,13 @@ export function App({ harnesses }: Props) {
     }
   };
 
-  const handleBack = () => {
-    setScreen("select");
-    setSelectedHarness(null);
-    setSessionId(null);
-  };
-
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  if (screen === "checking") {
+  if (screen === "checking" || screen === "loading") {
     return (
       <Box padding={2}>
         <Text color="cyan">◆ </Text>
-        <Text dimColor>Loading…</Text>
+        <Text dimColor>{screen === "checking" ? "Loading…" : "Starting…"}</Text>
       </Box>
     );
   }
@@ -84,18 +112,20 @@ export function App({ harnesses }: Props) {
   if (screen === "config") {
     return (
       <ConfigScreen
-        onDone={() => setScreen("select")}
+        onDone={async () => {
+          setScreen("loading");
+          try {
+            const res = await fetch(`http://localhost:${DEFAULT_PORT}/api/default-session`, {
+              method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+            });
+            const data = await res.json() as { sessionId?: string };
+            setSessionId(data.sessionId!);
+            setSelectedHarness(DEFAULT_HARNESS);
+            setScreen("chat");
+          } catch { setScreen("select"); }
+        }}
         showSkipOption={true}
       />
-    );
-  }
-
-  if (screen === "loading") {
-    return (
-      <Box padding={2}>
-        <Text color="cyan">◆ </Text>
-        <Text>Starting session…</Text>
-      </Box>
     );
   }
 
@@ -111,8 +141,8 @@ export function App({ harnesses }: Props) {
   if (screen === "select") {
     return (
       <HarnessSelect
-        harnesses={harnesses}
-        onSelect={(h) => startSession(h.name)}
+        harnesses={harnesses.length > 0 ? harnesses : [DEFAULT_HARNESS]}
+        onSelect={(h) => startNamedSession(h.name)}
         onOpenSessions={() => setScreen("sessions")}
         onOpenConfig={() => setScreen("config")}
       />
@@ -123,21 +153,19 @@ export function App({ harnesses }: Props) {
     return (
       <SessionsList
         onResume={async (session: SessionInfo) => {
-          const harness = harnesses.find((h) => h.name === session.harnessName) ?? harnesses[0]!;
-          setSelectedHarness(harness);
-          await startSession(session.harnessName, session.id);
+          await startNamedSession(session.harnessName, session.id);
         }}
-        onBack={() => setScreen("select")}
+        onBack={() => setScreen(sessionId ? "chat" : "select")}
       />
     );
   }
 
-  if (screen === "chat" && selectedHarness && sessionId) {
+  if (screen === "chat" && sessionId) {
     return (
       <Chat
         harness={selectedHarness}
         sessionId={sessionId}
-        onBack={handleBack}
+        onBack={() => setScreen("select")}
         onOpenSessions={() => setScreen("sessions")}
       />
     );
