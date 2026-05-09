@@ -83,19 +83,62 @@ const sse = (type: string, data: unknown): string =>
 export function createServer(harnesses: LoadedHarness[]) {
   const app = new Hono();
 
-  // Auth status — used by TUI for onboarding
+  // Auth status — shows all configurable items and their state
   app.get("/api/auth/status", (c) => {
     const saved = readSavedKeys();
-    const providers = ["anthropic", "minimax", "openai"];
-    return c.json(
-      providers.map((p) => ({
-        provider: p,
+    return c.json({
+      providers: ["anthropic", "minimax", "openai"].map((p) => ({
+        id: p,
+        label: p === "anthropic" ? "Anthropic" : p === "minimax" ? "MiniMax" : "OpenAI",
+        envVar: `${p.toUpperCase()}_API_KEY`,
         configured: !!(process.env[`${p.toUpperCase()}_API_KEY`] ?? saved[p]),
-        source: process.env[`${p.toUpperCase()}_API_KEY`]
-          ? "env"
-          : saved[p] ? "config" : "none",
-      }))
-    );
+        source: process.env[`${p.toUpperCase()}_API_KEY`] ? "env" : saved[p] ? "config" : "none",
+      })),
+      connectors: [
+        {
+          id: "github",
+          label: "GitHub",
+          envVar: "GH_TOKEN",
+          configured: !!(process.env.GH_TOKEN ?? saved["github"]),
+          source: process.env.GH_TOKEN ? "env" : saved["github"] ? "config" : "none",
+          hint: "Required for creating issues. Run: gh auth login",
+        },
+        {
+          id: "google-workspace",
+          label: "Google Workspace",
+          envVar: "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE",
+          configured: !!(process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ?? saved["google-workspace"]),
+          source: process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ? "env" : saved["google-workspace"] ? "config" : "none",
+          hint: "Required for meeting transcripts. Run: gws auth login",
+        },
+      ],
+    });
+  });
+
+  // Save config item — writes to ~/.gates/config.json
+  app.post("/api/config", async (c) => {
+    const { section, id, value } = await c.req.json<{
+      section: "providers" | "connectors";
+      id: string;
+      value: string;
+    }>();
+
+    const existing = (() => {
+      try { return JSON.parse(fs.readFileSync(GATES_CONFIG, "utf-8")); }
+      catch { return { providers: {} }; }
+    })();
+
+    if (section === "providers") {
+      existing.providers ??= {};
+      existing.providers[id] = { ...(existing.providers[id] ?? {}), apiKey: value };
+    } else {
+      existing.connectors ??= {};
+      existing.connectors[id] = value;
+    }
+
+    fs.mkdirSync(path.dirname(GATES_CONFIG), { recursive: true });
+    fs.writeFileSync(GATES_CONFIG, JSON.stringify(existing, null, 2));
+    return c.json({ ok: true });
   });
 
   app.get("/api/harnesses", (c) =>

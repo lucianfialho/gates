@@ -6,9 +6,10 @@ interface Props {
   harnesses: LoadedHarness[];
   onSelect: (harness: LoadedHarness) => void;
   onOpenSessions: () => void;
+  onOpenConfig: () => void;
 }
 
-export function HarnessSelect({ harnesses, onSelect, onOpenSessions }: Props) {
+export function HarnessSelect({ harnesses, onSelect, onOpenSessions, onOpenConfig }: Props) {
   const [selected, setSelected] = useState(0);
 
   useInput((input, key) => {
@@ -16,6 +17,7 @@ export function HarnessSelect({ harnesses, onSelect, onOpenSessions }: Props) {
     if (key.downArrow) setSelected((s) => Math.min(harnesses.length - 1, s + 1));
     if (key.return) onSelect(harnesses[selected]!);
     if (input === "s") onOpenSessions();
+    if (input === "c") onOpenConfig();
   });
 
   return (
@@ -54,7 +56,7 @@ export function HarnessSelect({ harnesses, onSelect, onOpenSessions }: Props) {
         ))}
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>↑↓ navigate  ↵ select  s sessions  q quit</Text>
+        <Text dimColor>↑↓ navigate  ↵ select  s sessions  c config  q quit</Text>
       </Box>
     </Box>
   );
