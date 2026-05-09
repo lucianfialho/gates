@@ -12,11 +12,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@gates-effect/runtime": "^0.1.0",
-    "@gates-effect/providers": "^0.1.0",
-    "@gates-effect/skills": "^0.1.0",
-    "@gates-effect/sandbox": "^0.1.0",
-    "@gates-effect/gates": "^0.1.0",
+    "@gates/runtime": "^0.1.0",
+    "@gates/providers": "^0.1.0",
+    "@gates/skills": "^0.1.0",
+    "@gates/sandbox": "^0.1.0",
+    "@gates/core": "^0.1.0",
     "effect": "4.0.0-beta.64",
     "hono": "^4.0.0",
     "@hono/node-server": "^1.12.0",
