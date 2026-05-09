@@ -129,14 +129,32 @@ export function createServer(harnesses: LoadedHarness[]) {
       ? (ghAuth.output.match(/Logged in to .+ account (.+?) \(/)?.[1] ?? "authenticated")
       : null;
 
-    // gws — Google Workspace CLI
+    // gws — Google Workspace CLI (may fail on older Linux due to GLIBC)
     const gwsWhich = await check("which", ["gws"]).catch(() => ({ ok: false, output: "" }));
-    const gwsVersion = gwsWhich.ok
-      ? await check("gws", ["--version"])
-      : { ok: false, output: "" };
-    const gwsAuth = gwsWhich.ok
-      ? await check("gws", ["auth", "status"])
-      : { ok: false, output: "" };
+    let gwsInstalled = false;
+    let gwsCompatible = false;
+    let gwsVersion = { ok: false, output: "" };
+    let gwsAuth = { ok: false, output: "" };
+    let gwsError: "not_installed" | "incompatible" | "not_authenticated" | null = null;
+
+    if (gwsWhich.ok) {
+      gwsVersion = await check("gws", ["--version"]);
+      if (gwsVersion.output.includes("GLIBC") || gwsVersion.output.includes("libc.so")) {
+        gwsInstalled = true;
+        gwsCompatible = false;
+        gwsError = "incompatible";
+      } else if (gwsVersion.ok) {
+        gwsInstalled = true;
+        gwsCompatible = true;
+        gwsAuth = await check("gws", ["auth", "status"]);
+        if (!gwsAuth.ok) gwsError = "not_authenticated";
+      }
+    } else {
+      gwsError = "not_installed";
+    }
+
+    // Check if googleapis npm fallback is available
+    const googleapisAvailable = await check("node", ["-e", "require('googleapis')"]).then((r) => r.ok).catch(() => false);
 
     return c.json({
       connectors: [
@@ -153,13 +171,18 @@ export function createServer(harnesses: LoadedHarness[]) {
         },
         {
           id: "google-workspace",
-          label: "Google Workspace CLI (gws)",
-          installed: gwsWhich.ok,
+          label: "Google Workspace",
+          installed: gwsInstalled,
           authenticated: gwsAuth.ok,
+          compatible: gwsCompatible,
+          error: gwsError,
+          fallbackAvailable: googleapisAvailable,
           user: null,
           version: gwsWhich.ok ? gwsVersion.output.split("\n")[0] : null,
           installCmd: "npm install -g @googleworkspace/cli",
           authCmd: "gws auth login",
+          fallbackInstallCmd: "npm install googleapis  # Node.js fallback (no binary needed)",
+          fallbackAuthNote: "Then set GOOGLE_CREDENTIALS_PATH=~/.gates/google-credentials.json",
           description: "Access Google Calendar, Meet transcripts and Drive",
         },
       ],

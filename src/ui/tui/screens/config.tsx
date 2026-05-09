@@ -19,6 +19,11 @@ interface ConnectorItem {
   description: string;
   installed: boolean;
   authenticated: boolean;
+  compatible?: boolean;
+  error?: "not_installed" | "incompatible" | "not_authenticated" | null;
+  fallbackAvailable?: boolean;
+  fallbackInstallCmd?: string;
+  fallbackAuthNote?: string;
   user: string | null;
   version: string | null;
   installCmd: string;
@@ -217,34 +222,62 @@ export function ConfigScreen({ onDone, showSkipOption = false }: Props) {
           ) : (
             connectors.map((c, i) => {
               const isSelected = selected === i;
-              const status = !c.installed ? "not_installed"
-                : !c.authenticated ? "not_authenticated"
-                : "ready";
+              const isIncompatible = c.error === "incompatible";
+              const status = c.authenticated ? "ready"
+                : isIncompatible ? "incompatible"
+                : !c.installed ? "not_installed"
+                : "not_authenticated";
+
+              const statusIcon = status === "ready" ? "✓"
+                : status === "incompatible" ? "⚡"
+                : status === "not_authenticated" ? "⚠"
+                : "✗";
+
+              const statusColor = status === "ready" ? "green"
+                : status === "incompatible" ? "magenta"
+                : status === "not_authenticated" ? "yellow"
+                : "red";
 
               return (
                 <Box key={c.id} flexDirection="column" marginBottom={1}>
                   <Box>
                     <Text color={isSelected ? "cyan" : undefined}>{isSelected ? "▶ " : "  "}</Text>
-                    <Text color={status === "ready" ? "green" : status === "not_authenticated" ? "yellow" : "red"}>
-                      {status === "ready" ? "✓" : status === "not_authenticated" ? "⚠" : "✗"}
-                    </Text>
-                    <Text bold={isSelected}> {c.label.padEnd(28)}</Text>
+                    <Text color={statusColor}>{statusIcon}</Text>
+                    <Text bold={isSelected}> {c.label.padEnd(26)}</Text>
                     {status === "ready" && c.user && <Text dimColor>{c.user}</Text>}
                     {status === "ready" && c.version && <Text dimColor>  {c.version}</Text>}
+                    {status === "incompatible" && <Text color="magenta">binary incompatible with this Linux (GLIBC)</Text>}
                   </Box>
                   {isSelected && (
                     <Box paddingLeft={4} flexDirection="column">
                       <Text dimColor>{c.description}</Text>
                       {status === "not_installed" && (
                         <Box marginTop={0}>
-                          <Text color="yellow">Install: </Text>
-                          <Text>{c.installCmd}</Text>
+                          <Text color="yellow">Install: </Text><Text>{c.installCmd}</Text>
                         </Box>
                       )}
                       {status === "not_authenticated" && (
                         <Box marginTop={0}>
-                          <Text color="yellow">Authenticate: </Text>
-                          <Text>{c.authCmd}</Text>
+                          <Text color="yellow">Authenticate: </Text><Text>{c.authCmd}</Text>
+                        </Box>
+                      )}
+                      {status === "incompatible" && (
+                        <Box flexDirection="column" marginTop={0}>
+                          <Box>
+                            <Text color="magenta">The gws binary requires a newer Linux (GLIBC 2.39+).</Text>
+                          </Box>
+                          <Box marginTop={0}>
+                            <Text color="cyan">Alternative (Node.js, no binary needed):</Text>
+                          </Box>
+                          {c.fallbackInstallCmd && (
+                            <Box><Text dimColor>  {c.fallbackInstallCmd}</Text></Box>
+                          )}
+                          {c.fallbackAuthNote && (
+                            <Box><Text dimColor>  {c.fallbackAuthNote}</Text></Box>
+                          )}
+                          {c.fallbackAvailable && (
+                            <Box marginTop={0}><Text color="green">✓ googleapis already available — set credentials to use</Text></Box>
+                          )}
                         </Box>
                       )}
                     </Box>
