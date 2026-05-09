@@ -72,6 +72,72 @@ const toProviderMessage = (m: Message): ProviderMessage => ({
   timestamp: m.timestamp,
 });
 
+// ── Known models per provider ────────────────────────────────────────────────
+
+export const KNOWN_MODELS: Record<string, Array<{ id: string; label: string; tier: "fast" | "balanced" | "powerful" }>> = {
+  anthropic: [
+    { id: "claude-opus-4-7",         label: "Claude Opus 4.7",     tier: "powerful" },
+    { id: "claude-sonnet-4-6",       label: "Claude Sonnet 4.6",   tier: "balanced" },
+    { id: "claude-haiku-4-5",        label: "Claude Haiku 4.5",    tier: "fast" },
+  ],
+  openai: [
+    { id: "o3",           label: "o3",           tier: "powerful" },
+    { id: "gpt-4o",       label: "GPT-4o",       tier: "balanced" },
+    { id: "gpt-4o-mini",  label: "GPT-4o mini",  tier: "fast" },
+  ],
+  minimax: [
+    { id: "MiniMax-M2.7",  label: "MiniMax M2.7",  tier: "balanced" },
+  ],
+};
+
+export interface ModelSlot {
+  role: "planning" | "execution" | "review";
+  label: string;
+  description: string;
+  provider: string;
+  model: string;
+  defaultProvider: string;
+  defaultModel: string;
+}
+
+const DEFAULT_MODEL_SLOTS: ModelSlot[] = [
+  {
+    role: "planning",
+    label: "Planning",
+    description: "Deep reasoning for complex tasks — architecture, strategy, design",
+    provider: "anthropic", model: "claude-opus-4-7",
+    defaultProvider: "anthropic", defaultModel: "claude-opus-4-7",
+  },
+  {
+    role: "execution",
+    label: "Execution",
+    description: "Balanced speed/quality — implements, writes code, runs pipelines",
+    provider: "anthropic", model: "claude-sonnet-4-6",
+    defaultProvider: "anthropic", defaultModel: "claude-sonnet-4-6",
+  },
+  {
+    role: "review",
+    label: "Review",
+    description: "Fast and cheap — code review, quick feedback, validation",
+    provider: "anthropic", model: "claude-haiku-4-5",
+    defaultProvider: "anthropic", defaultModel: "claude-haiku-4-5",
+  },
+];
+
+function readModelSlots(): ModelSlot[] {
+  try {
+    const data = JSON.parse(fs.readFileSync(GATES_CONFIG, "utf-8")) as { models?: Record<string, { provider: string; model: string }> };
+    const saved = data.models ?? {};
+    return DEFAULT_MODEL_SLOTS.map((slot) => ({
+      ...slot,
+      provider: saved[slot.role]?.provider ?? slot.defaultProvider,
+      model: saved[slot.role]?.model ?? slot.defaultModel,
+    }));
+  } catch {
+    return DEFAULT_MODEL_SLOTS;
+  }
+}
+
 // ── Session registry ─────────────────────────────────────────────────────────
 
 const sessions = new Map<string, { harnessName: string; createdAt: number }>();
@@ -82,6 +148,11 @@ const sse = (type: string, data: unknown): string =>
 
 export function createServer(harnesses: LoadedHarness[]) {
   const app = new Hono();
+
+  // Model configuration
+  app.get("/api/config/models", (c) =>
+    c.json({ slots: readModelSlots(), knownModels: KNOWN_MODELS })
+  );
 
   // First launch detection — returns true once, then marks as seen
   app.get("/api/first-launch", (c) => {
@@ -241,11 +312,12 @@ export function createServer(harnesses: LoadedHarness[]) {
 
   // Save config item — writes to ~/.gates/config.json
   app.post("/api/config", async (c) => {
-    const { section, id, value } = await c.req.json<{
-      section: "providers" | "connectors";
+    const body = await c.req.json<{
+      section: "providers" | "connectors" | "models";
       id: string;
-      value: string;
+      value: string | { provider: string; model: string };
     }>();
+    const { section, id, value } = body;
 
     const existing = (() => {
       try { return JSON.parse(fs.readFileSync(GATES_CONFIG, "utf-8")); }
@@ -255,6 +327,9 @@ export function createServer(harnesses: LoadedHarness[]) {
     if (section === "providers") {
       existing.providers ??= {};
       existing.providers[id] = { ...(existing.providers[id] ?? {}), apiKey: value };
+    } else if (section === "models") {
+      existing.models ??= {};
+      existing.models[id] = value; // { provider, model }
     } else {
       existing.connectors ??= {};
       existing.connectors[id] = value;

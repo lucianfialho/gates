@@ -30,19 +30,37 @@ interface ConnectorItem {
   authCmd: string;
 }
 
+interface ModelSlot {
+  role: string;
+  label: string;
+  description: string;
+  provider: string;
+  model: string;
+}
+
+interface KnownModel { id: string; label: string; tier: "fast" | "balanced" | "powerful" }
+interface ModelsConfig {
+  slots: ModelSlot[];
+  knownModels: Record<string, KnownModel[]>;
+}
+
 interface AuthStatus { providers: ProviderItem[] }
 interface ConnectorStatus { connectors: ConnectorItem[] }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-type TabId = "providers" | "connectors";
+type TabId = "providers" | "connectors" | "models";
 
 interface Props {
   onDone: () => void;
   showSkipOption?: boolean;
 }
 
-type EditingState = { type: "provider"; id: string; label: string } | null;
+type EditingState =
+  | { type: "provider"; id: string; label: string }
+  | { type: "model_provider"; role: string; label: string; currentProvider: string }
+  | { type: "model_name"; role: string; label: string; provider: string }
+  | null;
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -50,6 +68,7 @@ export function ConfigScreen({ onDone, showSkipOption = false }: Props) {
   const [tab, setTab] = useState<TabId>("providers");
   const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [connectors, setConnectors] = useState<ConnectorItem[]>([]);
+  const [modelsConfig, setModelsConfig] = useState<ModelsConfig | null>(null);
   const [loadingConnectors, setLoadingConnectors] = useState(true);
   const [selected, setSelected] = useState(0);
   const [editing, setEditing] = useState<EditingState>(null);
@@ -73,15 +92,24 @@ export function ConfigScreen({ onDone, showSkipOption = false }: Props) {
       .catch(() => setLoadingConnectors(false));
   }, []);
 
-  useEffect(() => { loadProviders(); loadConnectors(); }, [loadProviders, loadConnectors]);
+  const loadModels = useCallback(() => {
+    fetch(`http://localhost:${DEFAULT_PORT}/api/config/models`)
+      .then((r) => r.json())
+      .then((d: unknown) => setModelsConfig(d as ModelsConfig))
+      .catch(() => {});
+  }, []);
 
-  const currentList = tab === "providers" ? providers : connectors;
+  useEffect(() => { loadProviders(); loadConnectors(); loadModels(); }, [loadProviders, loadConnectors, loadModels]);
+
+  const currentList = tab === "providers" ? providers
+    : tab === "connectors" ? connectors
+    : (modelsConfig?.slots ?? []);
 
   useInput((input, key) => {
     if (editing) return;
 
     if (key.tab || input === "\t") {
-      setTab((t) => t === "providers" ? "connectors" : "providers");
+      setTab((t) => t === "providers" ? "connectors" : t === "connectors" ? "models" : "providers");
       setSelected(0);
       return;
     }
@@ -114,51 +142,116 @@ export function ConfigScreen({ onDone, showSkipOption = false }: Props) {
       }
     }
 
-    if (input === "r" && tab === "connectors") {
-      loadConnectors();
-      flash("Refreshing connector status…");
+    if (input === "r" && tab === "connectors") { loadConnectors(); flash("Refreshing…"); }
+    if (input === "r" && tab === "models") { loadModels(); }
+
+    if (tab === "models" && key.return) {
+      const slot = (modelsConfig?.slots ?? [])[selected];
+      if (!slot) return;
+      setEditing({ type: "model_provider", role: slot.role, label: slot.label, currentProvider: slot.provider });
+      setInputValue(slot.provider);
     }
   });
 
   const handleSave = async () => {
     if (!editing || !inputValue.trim()) { setEditing(null); return; }
     try {
-      await fetch(`http://localhost:${DEFAULT_PORT}/api/config`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ section: "providers", id: editing.id, value: inputValue.trim() }),
-      });
-      flash(`✓ ${editing.label} saved`);
-      loadProviders();
+      if (editing.type === "provider") {
+        await fetch(`http://localhost:${DEFAULT_PORT}/api/config`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ section: "providers", id: editing.id, value: inputValue.trim() }),
+        });
+        flash(`✓ ${editing.label} saved`);
+        loadProviders();
+      } else if (editing.type === "model_provider") {
+        // Move to model name step
+        setEditing({ type: "model_name", role: editing.role, label: editing.label, provider: inputValue.trim() });
+        const known = modelsConfig?.knownModels[inputValue.trim()] ?? [];
+        setInputValue(known[0]?.id ?? "");
+        return;
+      } else if (editing.type === "model_name") {
+        await fetch(`http://localhost:${DEFAULT_PORT}/api/config`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ section: "models", id: editing.role, value: { provider: editing.provider, model: inputValue.trim() } }),
+        });
+        flash(`✓ ${editing.label} → ${editing.provider}/${inputValue.trim()}`);
+        loadModels();
+      }
     } finally {
       setEditing(null);
     }
   };
 
-  // ── Editing a provider key ───────────────────────────────────────────────────
+  // ── Editing screens ───────────────────────────────────────────────────────────
 
   if (editing) {
-    return (
-      <Box flexDirection="column" padding={2}>
-        <Box marginBottom={1}>
-          <Text bold color="cyan">◆ Configure {editing.label}</Text>
+    if (editing.type === "provider") {
+      return (
+        <Box flexDirection="column" padding={2}>
+          <Box marginBottom={1}><Text bold color="cyan">◆ Configure {editing.label}</Text></Box>
+          <Box marginBottom={1}><Text dimColor>Paste your API key — saved to ~/.gates/config.json</Text></Box>
+          <Box><Text color="cyan">❯ </Text>
+            <TextInput value={inputValue} onChange={setInputValue} onSubmit={handleSave} placeholder="sk-..." mask="*" />
+          </Box>
+          <Box marginTop={1}><Text dimColor>↵ save  Esc cancel</Text></Box>
         </Box>
-        <Box marginBottom={1}>
-          <Text dimColor>Paste your API key — saved to ~/.gates/config.json</Text>
+      );
+    }
+
+    if (editing.type === "model_provider") {
+      const knownProviders = ["anthropic", "minimax", "openai"];
+      return (
+        <Box flexDirection="column" padding={2}>
+          <Box marginBottom={1}><Text bold color="cyan">◆ {editing.label} — Select Provider</Text></Box>
+          <Box marginBottom={1}><Text dimColor>Which provider handles {editing.label.toLowerCase()} tasks?</Text></Box>
+          <Box><Text color="cyan">❯ </Text>
+            <TextInput value={inputValue} onChange={setInputValue} onSubmit={handleSave} placeholder="anthropic / minimax / openai" />
+          </Box>
+          <Box marginTop={1} flexDirection="column">
+            {knownProviders.map((p) => (
+              <Box key={p}><Text dimColor>  {p}</Text></Box>
+            ))}
+          </Box>
+          <Box marginTop={1}><Text dimColor>↵ next  Esc cancel</Text></Box>
         </Box>
-        <Box>
-          <Text color="cyan">❯ </Text>
-          <TextInput value={inputValue} onChange={setInputValue} onSubmit={handleSave} placeholder="sk-..." mask="*" />
+      );
+    }
+
+    if (editing.type === "model_name") {
+      const knownModels = modelsConfig?.knownModels[editing.provider] ?? [];
+      const tierIcon = { powerful: "⚡", balanced: "⚖", fast: "⚡" };
+      return (
+        <Box flexDirection="column" padding={2}>
+          <Box marginBottom={1}><Text bold color="cyan">◆ {editing.label} — Select Model</Text></Box>
+          <Box marginBottom={1}><Text dimColor>Provider: {editing.provider}</Text></Box>
+          <Box><Text color="cyan">❯ </Text>
+            <TextInput value={inputValue} onChange={setInputValue} onSubmit={handleSave} placeholder="model-id" />
+          </Box>
+          {knownModels.length > 0 && (
+            <Box marginTop={1} flexDirection="column">
+              {knownModels.map((m) => (
+                <Box key={m.id}>
+                  <Text dimColor>  {m.id.padEnd(32)}</Text>
+                  <Text color={m.tier === "powerful" ? "magenta" : m.tier === "balanced" ? "cyan" : "green"}>
+                    {m.tier}
+                  </Text>
+                </Box>
+              ))}
+            </Box>
+          )}
+          <Box marginTop={1}><Text dimColor>↵ save  Esc cancel</Text></Box>
         </Box>
-        <Box marginTop={1}><Text dimColor>↵ save  Esc cancel</Text></Box>
-      </Box>
-    );
+      );
+    }
   }
 
   // ── Main config screen ───────────────────────────────────────────────────────
 
   const providersDone = providers.filter((p) => p.configured).length;
   const connectorsDone = connectors.filter((c) => c.authenticated).length;
+  const slots = modelsConfig?.slots ?? [];
 
   return (
     <Box flexDirection="column" padding={2}>
@@ -169,26 +262,19 @@ export function ConfigScreen({ onDone, showSkipOption = false }: Props) {
 
       {/* Tabs */}
       <Box marginBottom={1}>
-        <Box
-          borderStyle="single"
-          paddingX={1}
-          borderColor={tab === "providers" ? "cyan" : "gray"}
-        >
-          <Text color={tab === "providers" ? "cyan" : "white"}>
-            AI Providers {providersDone}/{providers.length}
-          </Text>
-        </Box>
-        <Text dimColor>  </Text>
-        <Box
-          borderStyle="single"
-          paddingX={1}
-          borderColor={tab === "connectors" ? "cyan" : "gray"}
-        >
-          <Text color={tab === "connectors" ? "cyan" : "white"}>
-            Connectors {connectorsDone}/{connectors.length}
-          </Text>
-        </Box>
-        <Text dimColor>  Tab to switch</Text>
+        {([
+          { id: "providers", label: `Providers ${providersDone}/${providers.length}` },
+          { id: "connectors", label: `Connectors ${connectorsDone}/${connectors.length}` },
+          { id: "models", label: `Models` },
+        ] as Array<{ id: TabId; label: string }>).map(({ id, label }) => (
+          <React.Fragment key={id}>
+            <Box borderStyle="single" paddingX={1} borderColor={tab === id ? "cyan" : "gray"}>
+              <Text color={tab === id ? "cyan" : "white"}>{label}</Text>
+            </Box>
+            <Text dimColor>  </Text>
+          </React.Fragment>
+        ))}
+        <Text dimColor>Tab to switch</Text>
       </Box>
 
       {/* Providers tab */}
@@ -289,6 +375,34 @@ export function ConfigScreen({ onDone, showSkipOption = false }: Props) {
         </Box>
       )}
 
+      {/* Models tab */}
+      {tab === "models" && (
+        <Box flexDirection="column" paddingLeft={1}>
+          {slots.map((slot, i) => {
+            const isSelected = selected === i;
+            const tierColor = slot.model.includes("opus") || slot.model.includes("o3") ? "magenta"
+              : slot.model.includes("haiku") || slot.model.includes("mini") ? "green"
+              : "cyan";
+            return (
+              <Box key={slot.role} flexDirection="column" marginBottom={1}>
+                <Box>
+                  <Text color={isSelected ? "cyan" : undefined}>{isSelected ? "▶ " : "  "}</Text>
+                  <Text bold={isSelected} color="white">{slot.label.padEnd(12)}</Text>
+                  <Text color={tierColor}>{slot.provider}</Text>
+                  <Text dimColor>/</Text>
+                  <Text color={tierColor}>{slot.model}</Text>
+                </Box>
+                {isSelected && (
+                  <Box paddingLeft={4}>
+                    <Text dimColor>{slot.description}</Text>
+                  </Box>
+                )}
+              </Box>
+            );
+          })}
+        </Box>
+      )}
+
       {/* Message / feedback */}
       {message && (
         <Box marginTop={1} paddingLeft={2}>
@@ -300,8 +414,10 @@ export function ConfigScreen({ onDone, showSkipOption = false }: Props) {
       <Box marginTop={1}>
         <Text dimColor>
           {tab === "providers"
-            ? "↑↓ navigate  ↵ add key  Tab connectors  Esc back"
-            : "↑↓ navigate  ↵ show command  r refresh  Tab providers  Esc back"}
+            ? "↑↓ navigate  ↵ add key  Tab → next  Esc back"
+            : tab === "connectors"
+            ? "↑↓ navigate  ↵ show command  r refresh  Tab → next  Esc back"
+            : "↑↓ navigate  ↵ change model  Tab → next  Esc back"}
         </Text>
       </Box>
     </Box>
