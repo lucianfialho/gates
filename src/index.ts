@@ -141,4 +141,35 @@ program
     login(options);
   });
 
+program
+  .command("onboarding")
+  .description("Reset onboarding — open configuration wizard on next launch")
+  .option("--now", "Open configuration wizard immediately", false)
+  .action(async (options) => {
+    const { readFileSync, writeFileSync, existsSync, mkdirSync } = await import("fs");
+    const { join } = await import("path");
+    const { homedir } = await import("os");
+
+    const configPath = join(homedir(), ".gates", "config.json");
+    mkdirSync(join(homedir(), ".gates"), { recursive: true });
+
+    const existing = (() => {
+      try { return JSON.parse(readFileSync(configPath, "utf-8")); }
+      catch { return {}; }
+    })();
+
+    delete existing._onboarded;
+    writeFileSync(configPath, JSON.stringify(existing, null, 2));
+    console.log("✓ Onboarding reset — configuration wizard will open on next launch.");
+
+    if (options.now) {
+      console.log("Opening configuration wizard...");
+      // Re-run gates to trigger onboarding
+      const { execFileSync } = await import("child_process");
+      try {
+        execFileSync(process.argv[1]!, [], { stdio: "inherit" });
+      } catch { /* user closed */ }
+    }
+  });
+
 program.parse();
