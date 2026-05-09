@@ -11,18 +11,52 @@ import { makeLocalSandbox } from "@gatesai/sandbox";
 import { discoverSkills, makeSkillExecutor, createSandboxToolExecutor } from "@gatesai/skills";
 import type { LoadedHarness } from "../harness/loader.js";
 import type { HarnessConfig } from "../harness/define.js";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 
 export const DEFAULT_PORT = 3583;
 const MAX_TOOL_ITERATIONS = 10;
 
+// ── Read ~/.gates/config.json (written by `gates login`) ─────────────────────
+
+const GATES_CONFIG = path.join(os.homedir(), ".gates", "config.json");
+
+function readSavedKeys(): Record<string, string> {
+  try {
+    const data = JSON.parse(fs.readFileSync(GATES_CONFIG, "utf-8")) as {
+      providers?: Record<string, { apiKey?: string }>;
+    };
+    const keys: Record<string, string> = {};
+    for (const [provider, cfg] of Object.entries(data.providers ?? {})) {
+      if (cfg.apiKey) keys[provider] = cfg.apiKey;
+    }
+    return keys;
+  } catch {
+    return {};
+  }
+}
+
 // ── Provider factory ─────────────────────────────────────────────────────────
 
 function makeProvider(config: HarnessConfig): Provider {
+  const saved = readSavedKeys();
+  const providerType = config.provider.type ?? "minimax";
+
   const apiKey =
     config.provider.apiKey ??
-    process.env[`${config.provider.type.toUpperCase()}_API_KEY`] ??
+    process.env[`${providerType.toUpperCase()}_API_KEY`] ??
+    saved[providerType] ??
     "";
-  switch (config.provider.type) {
+
+  if (!apiKey) {
+    console.warn(
+      `[gates] No API key for provider "${providerType}". ` +
+      `Run: gates login --provider ${providerType} --key YOUR_KEY`
+    );
+  }
+
+  switch (providerType) {
     case "anthropic": return makeAnthropicProvider({ apiKey, model: config.provider.model });
     case "openai":    return makeOpenAIProvider({ apiKey, model: config.provider.model });
     case "minimax":
@@ -48,6 +82,21 @@ const sse = (type: string, data: unknown): string =>
 
 export function createServer(harnesses: LoadedHarness[]) {
   const app = new Hono();
+
+  // Auth status — used by TUI for onboarding
+  app.get("/api/auth/status", (c) => {
+    const saved = readSavedKeys();
+    const providers = ["anthropic", "minimax", "openai"];
+    return c.json(
+      providers.map((p) => ({
+        provider: p,
+        configured: !!(process.env[`${p.toUpperCase()}_API_KEY`] ?? saved[p]),
+        source: process.env[`${p.toUpperCase()}_API_KEY`]
+          ? "env"
+          : saved[p] ? "config" : "none",
+      }))
+    );
+  });
 
   app.get("/api/harnesses", (c) =>
     c.json(harnesses.map((h) => ({
