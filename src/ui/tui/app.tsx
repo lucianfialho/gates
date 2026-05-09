@@ -20,17 +20,18 @@ export function App({ harnesses }: Props) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Check auth on startup — show config screen if nothing is configured
+  // Show config on first launch or if nothing is configured
   useEffect(() => {
-    fetch(`http://localhost:${DEFAULT_PORT}/api/auth/status`)
-      .then((r) => r.json())
-      .then((data: unknown) => {
-        const status = data as {
-          providers: Array<{ configured: boolean }>;
-          connectors: Array<{ configured: boolean }>;
-        };
+    Promise.all([
+      fetch(`http://localhost:${DEFAULT_PORT}/api/auth/status`).then((r) => r.json()),
+      fetch(`http://localhost:${DEFAULT_PORT}/api/first-launch`).then((r) => r.json()),
+    ])
+      .then(([statusData, launchData]: [unknown, unknown]) => {
+        const status = statusData as { providers: Array<{ configured: boolean }> };
+        const launch = launchData as { firstLaunch: boolean };
         const anyConfigured = status.providers.some((p) => p.configured);
-        setScreen(anyConfigured ? "select" : "config");
+        // Show config if: first launch ever, OR nothing configured at all
+        setScreen(launch.firstLaunch || !anyConfigured ? "config" : "select");
       })
       .catch(() => setScreen("select")); // fail open
   }, []);

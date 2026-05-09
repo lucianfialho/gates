@@ -83,6 +83,24 @@ const sse = (type: string, data: unknown): string =>
 export function createServer(harnesses: LoadedHarness[]) {
   const app = new Hono();
 
+  // First launch detection — returns true once, then marks as seen
+  app.get("/api/first-launch", (c) => {
+    const existing = (() => {
+      try { return JSON.parse(fs.readFileSync(GATES_CONFIG, "utf-8")); }
+      catch { return {}; }
+    })();
+
+    const isFirst = existing._onboarded !== true;
+
+    if (isFirst) {
+      existing._onboarded = true;
+      fs.mkdirSync(path.dirname(GATES_CONFIG), { recursive: true });
+      fs.writeFileSync(GATES_CONFIG, JSON.stringify(existing, null, 2));
+    }
+
+    return c.json({ firstLaunch: isFirst });
+  });
+
   // Auth status — shows all configurable items and their state
   app.get("/api/auth/status", (c) => {
     const saved = readSavedKeys();
