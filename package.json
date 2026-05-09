@@ -1,33 +1,36 @@
 {
   "name": "gates",
   "version": "0.1.0",
-  "description": "AI Agent Harness — CLI and Terminal UI for building AI pipelines",
+  "description": "AI Agent Harness — CLI and Terminal UI",
   "type": "module",
   "bin": {
     "gates": "./dist/index.js"
   },
   "scripts": {
-    "dev": "node --import tsx/esm src/index.ts",
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev": "node --import tsx/esm src/index.ts"
   },
   "dependencies": {
-    "@gatesai/runtime": "^0.1.0",
-    "@gatesai/providers": "^0.1.0",
-    "@gatesai/skills": "^0.1.0",
-    "@gatesai/sandbox": "^0.1.0",
     "@gatesai/core": "^0.1.0",
+    "@gatesai/providers": "^0.1.0",
+    "@gatesai/runtime": "^0.1.0",
+    "@gatesai/sandbox": "^0.1.0",
+    "@gatesai/skills": "^0.1.0",
     "effect": "4.0.0-beta.64",
     "hono": "^4.0.0",
     "@hono/node-server": "^1.12.0",
     "ink": "^5.0.1",
     "ink-text-input": "^6.0.0",
     "react": "^18.3.1",
-    "commander": "^12.0.0"
+    "commander": "^12.0.0",
+    "js-yaml": "^4.1.0",
+    "chalk": "^5.3.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.1",
+    "@types/js-yaml": "^4.0.9",
     "tsx": "^4.19.0",
     "typescript": "^5.4.0"
   },
