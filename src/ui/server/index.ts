@@ -677,6 +677,17 @@ export function createServer(harnesses: LoadedHarness[]) {
         const data = await Effect.runPromise(history.toData({ sessionId, harnessName: meta.harnessName }));
         await Effect.runPromise(store.save(storageKey, data));
 
+        // If model used tools but produced no final text, ask for a summary
+        if (!finalContent.trim() && iteration > 0) {
+          await write("thinking", {});
+          const summaryResult = await Effect.runPromise(
+            Effect.result(provider.chat(currentMessages))
+          );
+          if (summaryResult._tag === "Success") {
+            finalContent = summaryResult.success.content;
+          }
+        }
+
         // Stream final response word by word
         for (const word of finalContent.split(/(\s+)/)) {
           if (word) {
