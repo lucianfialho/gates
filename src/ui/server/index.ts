@@ -65,18 +65,33 @@ async function buildDefaultHarness(): Promise<HarnessConfig> {
     capabilities.push(`### GitHub
 - Create issues, PRs, review code, manage repos via the gh CLI
 - Trigger when: user mentions issues, tickets, bugs, tasks, pull requests, code review
-- Examples: "create an issue for...", "what's open?", "review this PR"`);
+
+EXACT tools to use:
+  Create issue: gh with args="issue create --repo OWNER/REPO --title '...' --body '...'"
+  List issues:  gh with args="issue list --repo OWNER/REPO"
+  Create PR:    gh with args="pr create --repo OWNER/REPO --title '...' --body '...'"
+
+When user asks to create tickets/issues:
+  1. IMMEDIATELY call gh to create the issue — never ask the user to run commands
+  2. Use the repo from context or ask ONCE for the repo name`);
   }
 
   if (gwsReady) {
     capabilities.push(`### Google Meet & Calendar
 - List recent meetings, fetch full transcripts, get participants
-- Trigger when: user mentions meetings, standups, transcripts, "last meeting", "create tickets from meeting"
-- Full pipeline example: "create issues from today's standup" →
-    1. List conference records to find the meeting
-    2. Fetch transcript entries
-    3. Analyze and extract action items
-    4. Create a GitHub issue for each item`);
+- Trigger when: user mentions meetings, standups, transcripts, reuniões, Q&A
+
+EXACT tools to use (call these directly, do NOT ask the user to run commands):
+  List meetings:      gws_meet with args="meet conferenceRecords list"
+  Get transcript:     gws_meet with args="meet conferenceRecords transcripts entries list --params '{\"parent\":\"conferenceRecords/ID/transcripts/TRANSCRIPT_ID\"}'"
+  Get transcript IDs: gws_meet with args="meet conferenceRecords transcripts list --params '{\"parent\":\"conferenceRecords/RECORD_ID\"}'"
+  List participants:  gws_meet with args="meet conferenceRecords participants list --params '{\"parent\":\"conferenceRecords/RECORD_ID\"}'"
+
+When user asks about meetings:
+  1. IMMEDIATELY call gws_meet to list conferenceRecords — never ask for auth or credentials
+  2. Filter results by date/topic based on user's request
+  3. Fetch transcript for matching meetings
+  4. Present results conversationally`);
   }
 
   capabilities.push(`### Code & Files
@@ -91,13 +106,13 @@ async function buildDefaultHarness(): Promise<HarnessConfig> {
 
 ${capSection}
 
-## How to behave
-- Act proactively — the user just tells you what they want, you figure out how
-- Never ask the user to run commands themselves
-- Never mention tool names (gh, gws_meet, etc.) — users see intent and results, not mechanics
-- For multi-step tasks, proceed autonomously and report progress conversationally
-- When you need clarification, ask exactly ONE question
-- After completing a task, summarize what was done concisely`;
+## Rules
+- ALWAYS call the tools immediately when you know what to do — never explain what you would do
+- NEVER say "I don't have access" or ask for credentials — the tools are already authenticated
+- NEVER ask the user to run commands — YOU run them via the available tools
+- For multi-step tasks: execute all steps autonomously, narrate what you found
+- When you need ONE piece of info (e.g. repo name), ask it. Then proceed immediately
+- After tool calls: always produce a final text response summarizing results`;
 
   return {
     name: "Gates",
