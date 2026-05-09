@@ -43,124 +43,39 @@ async function buildDefaultHarness(): Promise<HarnessConfig> {
   const saved = readSavedKeys();
 
   // Pick best available provider
-  const providerType = process.env.ANTHROPIC_API_KEY ?? saved["anthropic"] ? "anthropic"
-    : process.env.MINIMAX_API_KEY ?? saved["minimax"] ? "minimax"
-    : process.env.OPENAI_API_KEY ?? saved["openai"] ? "openai"
+  const providerType = (process.env.ANTHROPIC_API_KEY ?? saved["anthropic"]) ? "anthropic"
+    : (process.env.MINIMAX_API_KEY ?? saved["minimax"]) ? "minimax"
+    : (process.env.OPENAI_API_KEY ?? saved["openai"]) ? "openai"
     : "minimax";
 
-  // Detect configured connectors to build capabilities section
-  const { execFile: ef } = await import("child_process");
-  const { promisify } = await import("util");
-  const exec = promisify(ef);
-  const tryCmd = async (cmd: string, args: string[]) => {
-    try { await exec(cmd, args, { timeout: 3000 }); return true; } catch { return false; }
-  };
+  // Load connector knowledge via registry.allDocs()
+  let connectorDocs = "";
+  try {
+    const { loadConnectors } = await import("@gatesai/skills");
+    const connectorDir = `${process.cwd()}/.gates/connectors`;
+    const registry = await Effect.runPromise(
+      loadConnectors(connectorDir, {
+        GH_TOKEN: process.env.GH_TOKEN ?? saved["github"] ?? "",
+        GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE:
+          process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ?? saved["google-workspace"] ?? "",
+      })
+    );
+    const docs = registry.allDocs();
+    if (docs.trim()) connectorDocs = `\n\n## Tool Reference\n\n${docs}`;
+  } catch { /* connectors optional */ }
 
-  const ghReady = await tryCmd("gh", ["auth", "status"]);
-  const gwsReady = await tryCmd("gws", ["auth", "status"]);
-
-  const capabilities: string[] = [];
-
-  if (ghReady) {
-    capabilities.push(`### GitHub
-- Create issues, PRs, review code, manage repos via the gh CLI
-- Trigger when: user mentions issues, tickets, bugs, tasks, pull requests, code review
-
-EXACT tools to use:
-  Create issue: gh with args="issue create --repo OWNER/REPO --title '...' --body '...'"
-  List issues:  gh with args="issue list --repo OWNER/REPO"
-  Create PR:    gh with args="pr create --repo OWNER/REPO --title '...' --body '...'"
-
-When user asks to create tickets/issues:
-  1. IMMEDIATELY call gh to create the issue — never ask the user to run commands
-  2. Use the repo from context or ask ONCE for the repo name`);
-  }
-
-  if (gwsReady) {
-    capabilities.push(`### Google Meet & Calendar
-- List recent meetings, fetch full transcripts, get participants
-- Trigger when: user mentions meetings, standups, transcripts, reuniões, Q&A
-
-EXACT tools to use (call these directly, do NOT ask the user to run commands):
-  List meetings:      gws_meet with args="meet conferenceRecords list"
-  Get transcript:     gws_meet with args="meet conferenceRecords transcripts entries list --params '{\"parent\":\"conferenceRecords/ID/transcripts/TRANSCRIPT_ID\"}'"
-  Get transcript IDs: gws_meet with args="meet conferenceRecords transcripts list --params '{\"parent\":\"conferenceRecords/RECORD_ID\"}'"
-  List participants:  gws_meet with args="meet conferenceRecords participants list --params '{\"parent\":\"conferenceRecords/RECORD_ID\"}'"
-
-When user asks about meetings:
-  1. IMMEDIATELY call gws_meet to list conferenceRecords — never ask for auth or credentials
-  2. Filter results by date/topic based on user's request
-  3. Fetch transcript for matching meetings
-  4. Present results conversationally`);
-  }
-
-  capabilities.push(`### Code & Files
-- Read, write, search, edit files in the project
-- Trigger when: user asks about code, files, implementation, debugging`);
-
-  const capSection = capabilities.length > 0
-    ? `## What you can do\n\n${capabilities.join("\n\n")}`
-    : `## What you can do\n\nYou can read, write, search and edit files in this project.`;
-
-  // Inject gws guide if available
-  let gwsGuide = "";
-  if (gwsReady) {
-    const guidePaths = [
-      `${process.cwd()}/.gates/docs/gws-guide.md`,
-      `${os.homedir()}/gates-effect/.gates/docs/gws-guide.md`,
-    ];
-    for (const p of guidePaths) {
-      try {
-        gwsGuide = "\n\n" + fs.readFileSync(p, "utf-8");
-        break;
-      } catch { /* not found */ }
-    }
-  }
-
-  // Few-shot examples from real failure patterns in session logs
-  const fewShot = gwsReady ? `
-## Critical: How to respond to meeting requests
-
-❌ WRONG (never do this):
-User: "puxa as reuniões de sexta"
-Agent: "Não tenho acesso ao Google Calendar neste ambiente..."
-
-✅ CORRECT (always do this):
-User: "puxa as reuniões de sexta"
-Agent: [calls bash: gws meet conferenceRecords list]
-Agent: "Encontrei 25 reuniões. Aqui estão as de sexta-feira: ..."
-
-❌ WRONG:
-User: "lista minhas reuniões"
-Agent: "Para acessar o Google Meet, preciso de autenticação OAuth..."
-
-✅ CORRECT:
-User: "lista minhas reuniões"
-Agent: [calls bash: gws meet conferenceRecords list --params '{"pageSize":50}']
-Agent: "Suas últimas reuniões: ..."
-
-❌ WRONG:
-User: "pega a transcrição da reunião Q&A"
-Agent: "Não tenho integração com o Google Meet configurada..."
-
-✅ CORRECT:
-User: "pega a transcrição da reunião Q&A"
-Agent: [calls bash: gws meet conferenceRecords list]
-Agent: [finds Q&A meeting ID, calls bash: gws meet conferenceRecords transcripts list]
-Agent: [calls bash: gws meet conferenceRecords transcripts entries list --page-all]
-Agent: "Transcrição da reunião Q&A de sexta-feira: ..."
-` : "";
-
+  // Generic harness — behavior rules only, no domain knowledge
   const systemPrompt = `You are Gates, an intelligent AI agent for your development workflow.
 
-${capSection}${gwsGuide}
-${fewShot}
-## Rules
-- ALWAYS call bash with gws/gh commands immediately — tools are authenticated, no setup needed
-- NEVER say "não tenho acesso", "not configured", "OAuth required", "no credentials" — these are WRONG
-- NEVER ask the user to run anything — you run it
-- For meetings: list first, then filter/search, never ask before listing
-- After tool calls: always write a final response summarizing results`;
+You have access to bash, read, write, grep, glob, and edit tools, plus any connector CLIs configured below.${connectorDocs}
+
+## Behavior rules
+- Call tools immediately when you know what to do — never explain first, never ask permission
+- NEVER say "I don't have access", "not configured", "OAuth required" or similar — if a tool is listed above, it works
+- NEVER ask the user to run commands — you run them
+- For multi-step tasks: execute all steps, narrate results as you go
+- After tool calls: always write a final text response summarizing what you found/did
+- When you truly need one piece of info (e.g. repo name), ask it once, then proceed`;
 
   return {
     name: "Gates",
