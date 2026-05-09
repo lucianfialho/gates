@@ -164,13 +164,39 @@ export function createServer(harnesses: LoadedHarness[]) {
         // Set up sandbox + tools (only those declared in harness config)
         const sandbox = await Effect.runPromise(makeLocalSandbox({ cwd: process.cwd() }));
         const allTools = toolsMap(sandbox);
+
+        // Built-in fetch_url tool — always available
+        allTools.set("fetch_url", {
+          name: "fetch_url",
+          description: "Fetch the content of a URL (GitHub pages, docs, APIs). Returns the response text.",
+          parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+          execute: (params) => Effect.gen(function* () {
+            const url = params["url"] as string;
+            const result = yield* Effect.result(Effect.tryPromise({
+              try: async () => {
+                const res = await fetch(url, {
+                  headers: { "User-Agent": "gates/0.1.0", "Accept": "text/html,application/json,text/plain,*/*" },
+                });
+                const text = await res.text();
+                return text.slice(0, 8000); // limit to 8k chars
+              },
+              catch: (e) => new Error(String(e)),
+            }));
+            if (result._tag === "Failure") return { content: `Error fetching ${url}: ${result.failure.message}`, isError: true };
+            return { content: result.success, metadata: { url } };
+          }),
+        });
+
         const declaredToolNames = loaded.config.tools ?? [];
 
-        const providerTools: ProviderTool[] = declaredToolNames
-          .flatMap((name) => {
+        const providerTools: ProviderTool[] = [
+          ...declaredToolNames.flatMap((name) => {
             const t = allTools.get(name);
             return t ? [{ name: t.name, description: t.description, parameters: t.parameters }] : [];
-          });
+          }),
+          // fetch_url always included
+          { name: "fetch_url", description: "Fetch the content of a URL", parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] } },
+        ];
 
         // Initial message list
         const currentMessages: ProviderMessage[] = [
@@ -264,7 +290,7 @@ export function createServer(harnesses: LoadedHarness[]) {
         }
         await write("done", { content: finalContent, usage: { totalTokens: 0 }, iterations: iteration });
       } catch (err) {
-        await write("error", { message: String(err) });
+        const msg = err instanceof Error ? err.message : (typeof err === "object" && err !== null && "message" in err) ? String((err as {message:unknown}).message) : JSON.stringify(err); await write("error", { message: msg });
       }
     });
   });
@@ -350,7 +376,7 @@ export function createServer(harnesses: LoadedHarness[]) {
           lastOutput: ctx.success.lastOutput,
         });
       } catch (err) {
-        await write("error", { message: String(err) });
+        const msg = err instanceof Error ? err.message : (typeof err === "object" && err !== null && "message" in err) ? String((err as {message:unknown}).message) : JSON.stringify(err); await write("error", { message: msg });
       }
     });
   });
