@@ -58,8 +58,8 @@ interface Props {
 
 type EditingState =
   | { type: "provider"; id: string; label: string }
-  | { type: "model_provider"; role: string; label: string; currentProvider: string }
-  | { type: "model_name"; role: string; label: string; provider: string }
+  | { type: "model_provider"; role: string; label: string; pickerIdx: number }
+  | { type: "model_name"; role: string; label: string; provider: string; pickerIdx: number }
   | null;
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -105,7 +105,33 @@ export function ConfigScreen({ onDone, showSkipOption = false }: Props) {
     : tab === "connectors" ? connectors
     : (modelsConfig?.slots ?? []);
 
+  const PROVIDERS_LIST = ["anthropic", "minimax", "openai"];
+
   useInput((input, key) => {
+    // ── Navigation inside pickers ──────────────────────────────────────────
+    if (editing && editing.type === "model_provider") {
+      if (key.upArrow)   setEditing({ ...editing, pickerIdx: Math.max(0, editing.pickerIdx - 1) });
+      if (key.downArrow) setEditing({ ...editing, pickerIdx: Math.min(PROVIDERS_LIST.length - 1, editing.pickerIdx + 1) });
+      if (key.escape)    setEditing(null);
+      if (key.return) {
+        const provider = PROVIDERS_LIST[editing.pickerIdx]!;
+        setEditing({ type: "model_name", role: editing.role, label: editing.label, provider, pickerIdx: 0 });
+      }
+      return;
+    }
+
+    if (editing && editing.type === "model_name") {
+      const models = modelsConfig?.knownModels[editing.provider] ?? [];
+      if (key.upArrow)   setEditing({ ...editing, pickerIdx: Math.max(0, editing.pickerIdx - 1) });
+      if (key.downArrow) setEditing({ ...editing, pickerIdx: Math.min(models.length - 1, editing.pickerIdx + 1) });
+      if (key.escape)    setEditing({ type: "model_provider", role: editing.role, label: editing.label, pickerIdx: PROVIDERS_LIST.indexOf(editing.provider) });
+      if (key.return) {
+        const model = models[editing.pickerIdx];
+        if (model) handleSaveModel(editing.role, editing.provider, model.id, editing.label);
+      }
+      return;
+    }
+
     if (editing) return;
 
     if (key.tab || input === "\t") {
@@ -148,10 +174,25 @@ export function ConfigScreen({ onDone, showSkipOption = false }: Props) {
     if (tab === "models" && key.return) {
       const slot = (modelsConfig?.slots ?? [])[selected];
       if (!slot) return;
-      setEditing({ type: "model_provider", role: slot.role, label: slot.label, currentProvider: slot.provider });
-      setInputValue(slot.provider);
+      setEditing({
+        type: "model_provider",
+        role: slot.role,
+        label: slot.label,
+        pickerIdx: Math.max(0, PROVIDERS_LIST.indexOf(slot.provider)),
+      });
     }
   });
+
+  const handleSaveModel = async (role: string, provider: string, model: string, label: string) => {
+    await fetch(`http://localhost:${DEFAULT_PORT}/api/config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ section: "models", id: role, value: { provider, model } }),
+    });
+    flash(`✓ ${label} → ${provider}/${model}`);
+    loadModels();
+    setEditing(null);
+  };
 
   const handleSave = async () => {
     if (!editing || !inputValue.trim()) { setEditing(null); return; }
@@ -164,12 +205,6 @@ export function ConfigScreen({ onDone, showSkipOption = false }: Props) {
         });
         flash(`✓ ${editing.label} saved`);
         loadProviders();
-      } else if (editing.type === "model_provider") {
-        // Move to model name step
-        setEditing({ type: "model_name", role: editing.role, label: editing.label, provider: inputValue.trim() });
-        const known = modelsConfig?.knownModels[inputValue.trim()] ?? [];
-        setInputValue(known[0]?.id ?? "");
-        return;
       } else if (editing.type === "model_name") {
         await fetch(`http://localhost:${DEFAULT_PORT}/api/config`, {
           method: "POST",
@@ -201,47 +236,44 @@ export function ConfigScreen({ onDone, showSkipOption = false }: Props) {
     }
 
     if (editing.type === "model_provider") {
-      const knownProviders = ["anthropic", "minimax", "openai"];
+      const list = ["anthropic", "minimax", "openai"];
       return (
         <Box flexDirection="column" padding={2}>
-          <Box marginBottom={1}><Text bold color="cyan">◆ {editing.label} — Select Provider</Text></Box>
-          <Box marginBottom={1}><Text dimColor>Which provider handles {editing.label.toLowerCase()} tasks?</Text></Box>
-          <Box><Text color="cyan">❯ </Text>
-            <TextInput value={inputValue} onChange={setInputValue} onSubmit={handleSave} placeholder="anthropic / minimax / openai" />
-          </Box>
-          <Box marginTop={1} flexDirection="column">
-            {knownProviders.map((p) => (
-              <Box key={p}><Text dimColor>  {p}</Text></Box>
+          <Box marginBottom={1}><Text bold color="cyan">◆ {editing.label} — Provider</Text></Box>
+          <Box flexDirection="column">
+            {list.map((p, i) => (
+              <Box key={p}>
+                <Text color={i === editing.pickerIdx ? "cyan" : undefined}>
+                  {i === editing.pickerIdx ? "▶ " : "  "}
+                </Text>
+                <Text bold={i === editing.pickerIdx}>{p}</Text>
+              </Box>
             ))}
           </Box>
-          <Box marginTop={1}><Text dimColor>↵ next  Esc cancel</Text></Box>
+          <Box marginTop={1}><Text dimColor>↑↓ navigate  ↵ select  Esc back</Text></Box>
         </Box>
       );
     }
 
     if (editing.type === "model_name") {
-      const knownModels = modelsConfig?.knownModels[editing.provider] ?? [];
-      const tierIcon = { powerful: "⚡", balanced: "⚖", fast: "⚡" };
+      const models = modelsConfig?.knownModels[editing.provider] ?? [];
+      const tierColor = (tier: string) => tier === "powerful" ? "magenta" : tier === "balanced" ? "cyan" : "green";
       return (
         <Box flexDirection="column" padding={2}>
-          <Box marginBottom={1}><Text bold color="cyan">◆ {editing.label} — Select Model</Text></Box>
-          <Box marginBottom={1}><Text dimColor>Provider: {editing.provider}</Text></Box>
-          <Box><Text color="cyan">❯ </Text>
-            <TextInput value={inputValue} onChange={setInputValue} onSubmit={handleSave} placeholder="model-id" />
+          <Box marginBottom={1}><Text bold color="cyan">◆ {editing.label} — Model</Text></Box>
+          <Box marginBottom={1}><Text dimColor>{editing.provider}</Text></Box>
+          <Box flexDirection="column">
+            {models.map((m, i) => (
+              <Box key={m.id}>
+                <Text color={i === editing.pickerIdx ? "cyan" : undefined}>
+                  {i === editing.pickerIdx ? "▶ " : "  "}
+                </Text>
+                <Text bold={i === editing.pickerIdx}>{m.label.padEnd(28)}</Text>
+                <Text color={tierColor(m.tier)}>{m.tier}</Text>
+              </Box>
+            ))}
           </Box>
-          {knownModels.length > 0 && (
-            <Box marginTop={1} flexDirection="column">
-              {knownModels.map((m) => (
-                <Box key={m.id}>
-                  <Text dimColor>  {m.id.padEnd(32)}</Text>
-                  <Text color={m.tier === "powerful" ? "magenta" : m.tier === "balanced" ? "cyan" : "green"}>
-                    {m.tier}
-                  </Text>
-                </Box>
-              ))}
-            </Box>
-          )}
-          <Box marginTop={1}><Text dimColor>↵ save  Esc cancel</Text></Box>
+          <Box marginTop={1}><Text dimColor>↑↓ navigate  ↵ select  Esc back</Text></Box>
         </Box>
       );
     }
