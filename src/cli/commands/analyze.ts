@@ -29,6 +29,9 @@ const HARNESS_FAILURE_PATTERNS = [
   { regex: /não tenho integraç|no integration/i, label: "agent_denied_integration" },
   { regex: /você pode.*rodar|you can.*run|execute o comando/i, label: "agent_asked_user_to_run" },
   { regex: /preciso de mais contexto|need more context/i, label: "agent_asked_unnecessary_question" },
+  // Agent announces action but doesn't execute it (last message ends with promise, no tools called)
+  { regex: /vou (exportar|buscar|verificar|analisar|rodar|executar|puxar) (agora|o conteúdo|os dados)/i, label: "agent_announced_but_did_not_act" },
+  { regex: /deixa eu (buscar|verificar|analisar|exportar|puxar)/i, label: "agent_announced_but_did_not_act" },
 ];
 
 function loadSessions(dir: string, sinceMs?: number): Array<{ id: string; messages: SessionMessage[] }> {

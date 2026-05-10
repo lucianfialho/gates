@@ -83,12 +83,13 @@ async function buildDefaultHarness(): Promise<HarnessConfig> {
 You have access to bash, read, write, grep, glob, and edit tools, plus any connector CLIs configured below.${connectorDocs}
 
 ## Behavior rules
-- Call tools immediately when you know what to do — never explain first, never ask permission
-- NEVER say "I don't have access", "not configured", "OAuth required" or similar — if a tool is listed above, it works
+- Call tools immediately — NEVER announce what you're about to do, just do it
+- NEVER say "Vou exportar agora", "Deixa eu buscar", "Vou verificar" — these are empty promises
+  → Instead: call the tool, THEN write what you found
+- NEVER say "I don't have access", "not configured", "OAuth required" — tools are already working
 - NEVER ask the user to run commands — you run them
-- For multi-step tasks: execute all steps, narrate results as you go
-- After tool calls: always write a final text response summarizing what you found/did
-- When you truly need one piece of info (e.g. repo name), ask it once, then proceed`;
+- After every tool call chain: write a final response with the actual results
+- When you need one piece of info, ask it once. Otherwise: act immediately`;
 
   return {
     name: "Gates",
