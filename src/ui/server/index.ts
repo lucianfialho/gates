@@ -3,10 +3,10 @@ import { serve } from "@hono/node-server";
 import { stream } from "hono/streaming";
 import { Effect } from "effect";
 import { makeMiniMaxProvider, makeAnthropicProvider, makeOpenAIProvider } from "@gatesai/providers";
-import type { Provider, Tool as ProviderTool } from "@gatesai/providers";
-import { makeFileSessionStore, SessionHistory, toolsMap, listSessions } from "@gatesai/runtime";
-import type { Message } from "@gatesai/runtime";
-import type { Message as ProviderMessage, ToolCall } from "@gatesai/providers";
+import type { Provider } from "@gatesai/providers";
+import { makeFileSessionStore, SessionHistory, toolsMap, listSessions, createHarness } from "@gatesai/runtime";
+import type { Message, HarnessStreamEvent } from "@gatesai/runtime";
+import type { Message as ProviderMessage } from "@gatesai/providers";
 import { makeLocalSandbox } from "@gatesai/sandbox";
 import { discoverSkills, makeSkillExecutor, createSandboxToolExecutor } from "@gatesai/skills";
 import type { LoadedHarness } from "../harness/loader.js";
@@ -16,7 +16,6 @@ import * as path from "path";
 import * as os from "os";
 
 export const DEFAULT_PORT = 3583;
-const MAX_TOOL_ITERATIONS = 10;
 
 // ── Read ~/.gates/config.json (written by `gates login`) ─────────────────────
 
@@ -36,104 +35,6 @@ function readSavedKeys(): Record<string, string> {
     return {};
   }
 }
-
-// ── Smart default harness ─────────────────────────────────────────────────────
-
-async function buildDefaultHarness(): Promise<HarnessConfig> {
-  const saved = readSavedKeys();
-
-  // Pick best available provider
-  const providerType = (process.env.ANTHROPIC_API_KEY ?? saved["anthropic"]) ? "anthropic"
-    : (process.env.MINIMAX_API_KEY ?? saved["minimax"]) ? "minimax"
-    : (process.env.OPENAI_API_KEY ?? saved["openai"]) ? "openai"
-    : "minimax";
-
-  // Load connector knowledge from multiple locations (merged)
-  // Order: global (~/.gates/connectors) + project (cwd/.gates/connectors)
-  const credentials = {
-    GH_TOKEN: process.env.GH_TOKEN ?? saved["github"] ?? "",
-    GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE:
-      process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ?? saved["google-workspace"] ?? "",
-  };
-
-  let connectorDocs = "";
-  try {
-    const { loadConnectors } = await import("@gatesai/skills");
-    const connectorPaths = [
-      path.join(os.homedir(), ".gates", "connectors"),  // global — always loaded
-      path.join(process.cwd(), ".gates", "connectors"), // project-level
-    ];
-
-    const allDocs: string[] = [];
-    for (const dir of connectorPaths) {
-      const result = await Effect.runPromise(Effect.result(loadConnectors(dir, credentials)));
-      if (result._tag === "Success") {
-        const docs = result.success.allDocs();
-        if (docs.trim()) allDocs.push(docs);
-      }
-    }
-
-    const combined = allDocs.join("\n\n---\n\n");
-    if (combined.trim()) connectorDocs = `\n\n## Tool Reference\n\n${combined}`;
-  } catch { /* connectors optional */ }
-
-  // Generic harness — behavior rules only, no domain knowledge
-  const systemPrompt = `You are Gates, an intelligent AI agent for your development workflow.
-
-You have access to bash, read, write, grep, glob, and edit tools, plus any connector CLIs configured below.${connectorDocs}
-
-## Behavior rules
-- Call tools immediately — NEVER announce what you're about to do, just do it
-- NEVER say "Vou exportar agora", "Deixa eu buscar", "Vou verificar" — these are empty promises
-  → Instead: call the tool, THEN write what you found
-- NEVER say "I don't have access", "not configured", "OAuth required" — tools are already working
-- NEVER ask the user to run commands — you run them
-- After every tool call chain: write a final response with the actual results
-- When you need one piece of info, ask it once. Otherwise: act immediately`;
-
-  return {
-    name: "Gates",
-    description: "Your AI development agent",
-    provider: { type: providerType as "anthropic" | "minimax" | "openai" },
-    systemPrompt,
-    tools: ["read", "write", "bash", "grep", "glob", "edit"],
-  };
-}
-
-// ── Provider factory ─────────────────────────────────────────────────────────
-
-function makeProvider(config: HarnessConfig): Provider {
-  const saved = readSavedKeys();
-  const providerType = config.provider.type ?? "minimax";
-
-  const apiKey =
-    config.provider.apiKey ??
-    process.env[`${providerType.toUpperCase()}_API_KEY`] ??
-    saved[providerType] ??
-    "";
-
-  if (!apiKey) {
-    console.warn(
-      `[gates] No API key for provider "${providerType}". ` +
-      `Run: gates login --provider ${providerType} --key YOUR_KEY`
-    );
-  }
-
-  switch (providerType) {
-    case "anthropic": return makeAnthropicProvider({ apiKey, model: config.provider.model });
-    case "openai":    return makeOpenAIProvider({ apiKey, model: config.provider.model });
-    case "minimax":
-    default:          return makeMiniMaxProvider({ apiKey, model: config.provider.model });
-  }
-}
-
-// ── Message type bridge ───────────────────────────────────────────────────────
-
-const toProviderMessage = (m: Message): ProviderMessage => ({
-  role: (m.role === "tool" ? "user" : m.role === "context" ? "system" : m.role) as ProviderMessage["role"],
-  content: m.content,
-  timestamp: m.timestamp,
-});
 
 // ── Known models per provider ────────────────────────────────────────────────
 
@@ -201,24 +102,192 @@ function readModelSlots(): ModelSlot[] {
   }
 }
 
+// ── Provider factory ─────────────────────────────────────────────────────────
+
+function makeProvider(config: HarnessConfig): Provider {
+  const saved = readSavedKeys();
+  const providerType = config.provider.type ?? "minimax";
+
+  const apiKey =
+    config.provider.apiKey ??
+    process.env[`${providerType.toUpperCase()}_API_KEY`] ??
+    saved[providerType] ??
+    "";
+
+  if (!apiKey) {
+    console.warn(
+      `[gates] No API key for provider "${providerType}". ` +
+      `Run: gates login --provider ${providerType} --key YOUR_KEY`
+    );
+  }
+
+  switch (providerType) {
+    case "anthropic": return makeAnthropicProvider({ apiKey, model: config.provider.model });
+    case "openai":    return makeOpenAIProvider({ apiKey, model: config.provider.model });
+    case "minimax":
+    default:          return makeMiniMaxProvider({ apiKey, model: config.provider.model });
+  }
+}
+
+// ── Message type bridge ───────────────────────────────────────────────────────
+
+const toProviderMessage = (m: Message): ProviderMessage => ({
+  role: (m.role === "tool" ? "user" : m.role === "context" ? "system" : m.role) as ProviderMessage["role"],
+  content: m.content,
+  timestamp: m.timestamp,
+});
+
 // ── Session registry ─────────────────────────────────────────────────────────
 
 const sessions = new Map<string, { harnessName: string; createdAt: number }>();
-const defaultHarnessCache = new Map<string, HarnessConfig>(); // sessionId → default harness config
+
+// Per-session harness configs for __default__ sessions
+const defaultHarnessCache = new Map<string, HarnessConfig>();
+
 const sse = (type: string, data: unknown): string =>
   `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
 
+// ── Server-level loaded connectors & tools ────────────────────────────────────
+
+interface ServerToolState {
+  // allTools: sandbox tools + connector tools + fetch_url, built per provider config
+  connectorTools: Map<string, import("@gatesai/runtime").Tool>;
+  connectorDocs: string;
+}
+
+async function loadServerTools(): Promise<ServerToolState> {
+  const saved = readSavedKeys();
+  const credentials = {
+    GH_TOKEN: process.env.GH_TOKEN ?? saved["github"] ?? "",
+    GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE:
+      process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ?? saved["google-workspace"] ?? "",
+  };
+
+  const connectorTools: Map<string, import("@gatesai/runtime").Tool> = new Map();
+  const allDocs: string[] = [];
+
+  try {
+    const { loadConnectors } = await import("@gatesai/skills");
+    const connectorPaths = [
+      path.join(os.homedir(), ".gates", "connectors"),   // global — always loaded
+      path.join(process.cwd(), ".gates", "connectors"),  // project-level
+    ];
+
+    for (const dir of connectorPaths) {
+      const result = await Effect.runPromise(Effect.result(loadConnectors(dir, credentials)));
+      if (result._tag === "Success") {
+        for (const [name, tool] of result.success.allTools()) {
+          connectorTools.set(name, tool);
+        }
+        const docs = result.success.allDocs();
+        if (docs.trim()) allDocs.push(docs);
+      }
+    }
+  } catch { /* connectors optional */ }
+
+  const combined = allDocs.join("\n\n---\n\n");
+  const connectorDocs = combined.trim() ? `\n\n## Tool Reference\n\n${combined}` : "";
+
+  return { connectorTools, connectorDocs };
+}
+
+// ── Build the default harness config (YAML-style) ────────────────────────────
+
+async function buildDefaultHarnessConfig(connectorDocs: string): Promise<HarnessConfig> {
+  const saved = readSavedKeys();
+
+  const providerType = (process.env.ANTHROPIC_API_KEY ?? saved["anthropic"]) ? "anthropic"
+    : (process.env.MINIMAX_API_KEY ?? saved["minimax"]) ? "minimax"
+    : (process.env.OPENAI_API_KEY ?? saved["openai"]) ? "openai"
+    : "minimax";
+
+  const systemPrompt = `You are Gates, an intelligent AI agent for your development workflow.
+
+You have access to bash, read, write, grep, glob, and edit tools, plus any connector CLIs configured below.${connectorDocs}
+
+## Behavior rules
+- Call tools immediately — NEVER announce what you're about to do, just do it
+- NEVER say "Vou exportar agora", "Deixa eu buscar", "Vou verificar" — these are empty promises
+  → Instead: call the tool, THEN write what you found
+- NEVER say "I don't have access", "not configured", "OAuth required" — tools are already working
+- NEVER ask the user to run commands — you run them
+- After every tool call chain: write a final response with the actual results
+- When you need one piece of info, ask it once. Otherwise: act immediately`;
+
+  return {
+    name: "Gates",
+    description: "Your AI development agent",
+    provider: { type: providerType as "anthropic" | "minimax" | "openai" },
+    systemPrompt,
+    tools: ["read", "write", "bash", "grep", "glob", "edit"],
+  };
+}
+
+// ── Build runtime HarnessConfig from gates YAML-style config ─────────────────
+
+function buildRuntimeHarnessConfig(
+  gatesConfig: HarnessConfig,
+  provider: Provider,
+  allTools: Map<string, import("@gatesai/runtime").Tool>,
+  declaredToolNames: string[],
+  isDefaultSession: boolean,
+) {
+  const toolsToExpose = isDefaultSession
+    ? [...allTools.keys()]
+    : [...declaredToolNames, "fetch_url"];
+
+  const sessionTools: Map<string, import("@gatesai/runtime").Tool> = new Map(
+    toolsToExpose.flatMap((name) => {
+      const t = allTools.get(name);
+      return t ? [[name, t]] : [];
+    })
+  );
+
+  const roles: import("@gatesai/runtime").Role[] = gatesConfig.roles?.map((r) => ({
+    name: r.name,
+    systemPrompt: r.systemPrompt,
+    model: r.model,
+  })) ?? [];
+
+  const defaultSystemPrompt =
+    gatesConfig.systemPrompt ?? "You are a helpful assistant.";
+
+  if (roles.length === 0 || !roles.find((r) => r.name === "default")) {
+    roles.push({ name: "default", systemPrompt: defaultSystemPrompt });
+  }
+
+  return createHarness({
+    provider: {
+      chat: (messages, tools) =>
+        Effect.mapError(
+          provider.chat(
+            messages.map((m) => ({
+              role: (m.role === "tool" ? "user" : m.role === "context" ? "system" : m.role) as ProviderMessage["role"],
+              content: m.content,
+              timestamp: m.timestamp,
+            })),
+            tools
+          ),
+          (e) => ({ code: e.code, message: e.message })
+        ),
+    },
+    tools: sessionTools,
+    maxToolIterations: 10,
+    roles,
+  });
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
-export function createServer(harnesses: LoadedHarness[]) {
+export function createServer(harnesses: LoadedHarness[], serverTools?: ServerToolState) {
   const app = new Hono();
 
   // Default session — creates a session with the smart default harness
   app.post("/api/default-session", async (c) => {
-    const defaultConfig = await buildDefaultHarness();
+    const connectorDocs = serverTools?.connectorDocs ?? "";
+    const defaultConfig = await buildDefaultHarnessConfig(connectorDocs);
     const sessionId = crypto.randomUUID();
     sessions.set(sessionId, { harnessName: "__default__", createdAt: Date.now() });
-    // Store the default config so chat endpoint can use it
     defaultHarnessCache.set(sessionId, defaultConfig);
     return c.json({ sessionId, harnessName: defaultConfig.name });
   });
@@ -506,49 +575,25 @@ export function createServer(harnesses: LoadedHarness[]) {
         const meta = sessions.get(sessionId);
         if (!meta) { await write("error", { message: "Session not found" }); return; }
 
-        // Resolve harness config: use default cache for __default__ sessions
+        // Resolve the gates-style harness config
         const harnessConfig: HarnessConfig = meta.harnessName === "__default__"
-          ? (defaultHarnessCache.get(sessionId) ?? await buildDefaultHarness())
+          ? (defaultHarnessCache.get(sessionId) ?? await buildDefaultHarnessConfig(serverTools?.connectorDocs ?? ""))
           : harnesses.find((h) => h.name === meta.harnessName)?.config
-            ?? await buildDefaultHarness();
+            ?? await buildDefaultHarnessConfig(serverTools?.connectorDocs ?? "");
 
         await write("start", { sessionId });
         await write("thinking", {});
 
-        const provider = makeProvider(harnessConfig);
-
-        // Load persisted history
-        const store = await Effect.runPromise(makeFileSessionStore());
-        const storageKey = `harness-ui:${sessionId}`;
-        const existing = await Effect.runPromise(store.load(storageKey));
-        const history = await Effect.runPromise(SessionHistory.fromData(existing));
-        const contextMessages = await Effect.runPromise(history.buildContext());
-
-        const activeRole = roleOverride ?? harnessConfig.defaultRole;
-        const systemPrompt =
-          harnessConfig.roles?.find((r) => r.name === activeRole)?.systemPrompt ??
-          harnessConfig.systemPrompt ?? "You are a helpful assistant.";
-
-        // Set up sandbox + tools + connectors
+        // Build sandbox + allTools (sandbox builtins + server-loaded connectors + fetch_url)
         const sandbox = await Effect.runPromise(makeLocalSandbox({ cwd: process.cwd() }));
-        const allTools = toolsMap(sandbox);
+        const allTools: Map<string, import("@gatesai/runtime").Tool> = new Map(toolsMap(sandbox));
 
-        // Load connector tools (gws_meet, gws_calendar, gh, etc.)
-        try {
-          const { loadConnectors } = await import("@gatesai/skills");
-          const connectorDir = `${process.cwd()}/.gates/connectors`;
-          const savedK = readSavedKeys();
-          const registry = await Effect.runPromise(
-            loadConnectors(connectorDir, {
-              GH_TOKEN: process.env.GH_TOKEN ?? savedK["github"] ?? "",
-              GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE:
-                process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ?? savedK["google-workspace"] ?? "",
-            })
-          );
-          for (const [name, tool] of registry.allTools()) {
+        // Merge connector tools loaded at server init
+        if (serverTools) {
+          for (const [name, tool] of serverTools.connectorTools) {
             allTools.set(name, tool);
           }
-        } catch { /* connectors optional */ }
+        }
 
         // Built-in fetch_url tool — always available
         allTools.set("fetch_url", {
@@ -563,7 +608,7 @@ export function createServer(harnesses: LoadedHarness[]) {
                   headers: { "User-Agent": "gates/0.1.0", "Accept": "text/html,application/json,text/plain,*/*" },
                 });
                 const text = await res.text();
-                return text.slice(0, 8000); // limit to 8k chars
+                return text.slice(0, 8000);
               },
               catch: (e) => new Error(String(e)),
             }));
@@ -575,121 +620,115 @@ export function createServer(harnesses: LoadedHarness[]) {
         const declaredToolNames = harnessConfig.tools ?? [];
         const isDefaultSession = meta.harnessName === "__default__";
 
-        // Default sessions get ALL available tools (sandbox + connectors)
-        // Named harnesses only get tools they declared
-        const toolsToExpose = isDefaultSession
-          ? [...allTools.keys()]
-          : [...declaredToolNames, "fetch_url"];
+        // Load persisted history
+        const store = await Effect.runPromise(makeFileSessionStore());
+        const storageKey = `harness-ui:${sessionId}`;
+        const existing = await Effect.runPromise(store.load(storageKey));
+        const sessionHistory = await Effect.runPromise(SessionHistory.fromData(existing));
+        const contextMessages = await Effect.runPromise(sessionHistory.buildContext());
 
-        const providerTools: ProviderTool[] = toolsToExpose.flatMap((name) => {
-          const t = allTools.get(name);
-          return t ? [{ name: t.name, description: t.description, parameters: t.parameters }] : [];
-        });
+        const activeRole = roleOverride ?? harnessConfig.defaultRole ?? "default";
 
-        // Initial message list
-        const currentMessages: ProviderMessage[] = [
-          { role: "system", content: systemPrompt, timestamp: Date.now() },
-          ...contextMessages.map(toProviderMessage),
-          { role: "user", content, timestamp: Date.now() },
-        ];
+        // Build a matching role list for the runtime harness
+        // Use the activeRole's system prompt (or fallback)
+        const systemPrompt =
+          harnessConfig.roles?.find((r) => r.name === activeRole)?.systemPrompt ??
+          harnessConfig.systemPrompt ?? "You are a helpful assistant.";
 
-        let finalContent = "";
-        let iteration = 0;
+        // Build the provider (per request — picks up live config/env changes)
+        const provider = makeProvider(harnessConfig);
 
-        // ── Agent loop ─────────────────────────────────────────────────────
-        while (iteration < MAX_TOOL_ITERATIONS) {
-          const result = await Effect.runPromise(
-            provider.chat(currentMessages, providerTools.length > 0 ? providerTools : undefined)
-          );
-          finalContent = result.content;
+        // Build runtime harness config and create a harness instance
+        const harnessInst = buildRuntimeHarnessConfig(
+          { ...harnessConfig, systemPrompt },
+          provider,
+          allTools,
+          declaredToolNames,
+          isDefaultSession,
+        );
 
-          if (!result.toolCalls?.length) break;
-
-          // Execute each tool call, streaming events as we go
-          const toolResults: Array<{ tc: ToolCall; output: string; isError: boolean }> = [];
-
-          for (const tc of result.toolCalls) {
-            await write("tool_call", { id: tc.id, name: tc.name, args: tc.arguments });
-
-            const tool = allTools.get(tc.name);
-            let output: string;
-            let isError = false;
-
-            if (tool) {
-              let params: Record<string, unknown> = {};
-              try { params = JSON.parse(tc.arguments); } catch { params = {}; }
-              const execResult = await Effect.runPromise(Effect.result(tool.execute(params)));
-              if (execResult._tag === "Success") {
-                output = execResult.success.content.slice(0, 2000);
-                isError = execResult.success.isError ?? false;
-              } else {
-                output = `Tool execution failed: ${String(execResult.failure)}`;
-                isError = true;
-              }
-            } else {
-              output = `Tool "${tc.name}" not available`;
-              isError = true;
-            }
-
-            await write("tool_result", { id: tc.id, name: tc.name, output, isError });
-            toolResults.push({ tc, output, isError });
-          }
-
-          // Append assistant + tool results to conversation
-          currentMessages.push({
-            role: "assistant",
-            content: result.content,
-            timestamp: Date.now(),
-            toolCalls: result.toolCalls,
-          });
-          currentMessages.push({
-            role: "user",
-            content: "",
-            timestamp: Date.now() + 1,
-            toolResults: toolResults.map(({ tc, output, isError }) => ({
-              toolCallId: tc.id,
-              content: output,
-              isError,
+        // Init session with persisted history pre-loaded
+        const session = await Effect.runPromise(
+          harnessInst.init({
+            role: activeRole,
+            initialHistory: contextMessages.map((m) => ({
+              id: crypto.randomUUID(),
+              role: (m.role === "tool" ? "tool" : m.role === "context" ? "context" : m.role) as Message["role"],
+              content: m.content,
+              timestamp: m.timestamp,
             })),
-          });
+          })
+        );
 
-          iteration++;
-        }
+        // Run the agent loop via session.prompt — onEvent fires SSE events in real time
+        const response = await Effect.runPromise(
+          session.prompt(content, {
+            onEvent: (e: HarnessStreamEvent) => {
+              write(e.type, e).catch(() => {});
+            },
+          })
+        );
 
-        // Persist: user message + final assistant response
-        const userMsg: Message = { id: crypto.randomUUID(), role: "user", content, timestamp: Date.now() };
+        let finalContent = response.content;
+        const iterations = response.iterations ?? 0;
+
+        // Retrieve updated history from the session (includes new user + assistant messages)
+        const updatedHistory = await Effect.runPromise(session.getHistory());
+
+        // Persist: rebuild from updated history
+        // We append only the new messages (last user + assistant pair) to the existing store
+        const userMsg: Message = {
+          id: crypto.randomUUID(),
+          role: "user",
+          content,
+          timestamp: Date.now(),
+        };
         const assistantMsg: Message = {
           id: crypto.randomUUID(),
           role: "assistant",
           content: finalContent,
           timestamp: Date.now() + 1,
         };
-        await Effect.runPromise(history.appendMessage(userMsg, "user"));
-        await Effect.runPromise(history.appendMessage(assistantMsg, "prompt"));
-        const data = await Effect.runPromise(history.toData({ sessionId, harnessName: meta.harnessName }));
+        await Effect.runPromise(sessionHistory.appendMessage(userMsg, "user"));
+        await Effect.runPromise(sessionHistory.appendMessage(assistantMsg, "prompt"));
+        const data = await Effect.runPromise(
+          sessionHistory.toData({ sessionId, harnessName: meta.harnessName })
+        );
         await Effect.runPromise(store.save(storageKey, data));
 
+        // Suppress unused variable warning
+        void updatedHistory;
+
         // If model used tools but produced no final text, ask for a summary
-        if (!finalContent.trim() && iteration > 0) {
+        if (!finalContent.trim() && iterations > 0) {
           await write("thinking", {});
+
+          // Build messages manually for the summary call
+          const summaryMessages: ProviderMessage[] = [
+            { role: "system", content: systemPrompt, timestamp: Date.now() },
+            ...contextMessages.map(toProviderMessage),
+            { role: "user", content, timestamp: Date.now() },
+          ];
+
           const summaryResult = await Effect.runPromise(
-            Effect.result(provider.chat(currentMessages))
+            Effect.result(provider.chat(summaryMessages))
           );
           if (summaryResult._tag === "Success") {
             finalContent = summaryResult.success.content;
           }
         }
 
-        // Stream final response word by word
+        // Stream final response word by word (fake delta streaming)
         for (const word of finalContent.split(/(\s+)/)) {
           if (word) {
             await write("delta", { text: word });
             await new Promise((r) => setTimeout(r, 8));
           }
         }
-        await write("done", { content: finalContent, usage: { totalTokens: 0 }, iterations: iteration });
+        await write("done", { content: finalContent, usage: { totalTokens: 0 }, iterations });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : (typeof err === "object" && err !== null && "message" in err) ? String((err as {message:unknown}).message) : JSON.stringify(err); await write("error", { message: msg });
+        const msg = err instanceof Error ? err.message : (typeof err === "object" && err !== null && "message" in err) ? String((err as {message:unknown}).message) : JSON.stringify(err);
+        await write("error", { message: msg });
       }
     });
   });
@@ -775,7 +814,8 @@ export function createServer(harnesses: LoadedHarness[]) {
           lastOutput: ctx.success.lastOutput,
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : (typeof err === "object" && err !== null && "message" in err) ? String((err as {message:unknown}).message) : JSON.stringify(err); await write("error", { message: msg });
+        const msg = err instanceof Error ? err.message : (typeof err === "object" && err !== null && "message" in err) ? String((err as {message:unknown}).message) : JSON.stringify(err);
+        await write("error", { message: msg });
       }
     });
   });
@@ -787,7 +827,11 @@ export async function startServer(
   harnesses: LoadedHarness[],
   port = DEFAULT_PORT
 ): Promise<() => void> {
-  const app = createServer(harnesses);
+  // Load connector tools once at server startup
+  const serverTools = await loadServerTools();
+  console.log(`[gates] Loaded ${serverTools.connectorTools.size} connector tool(s)`);
+
+  const app = createServer(harnesses, serverTools);
   const server = serve({ fetch: app.fetch, port });
   return () => server.close();
 }
