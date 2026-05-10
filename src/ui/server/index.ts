@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { stream } from "hono/streaming";
 import { Effect } from "effect";
-import { makeMiniMaxProvider, makeAnthropicProvider, makeOpenAIProvider } from "@gatesai/providers";
+import { makeMiniMaxProvider, makeAnthropicProvider, makeOpenAIProvider, makeClaudeCodeProvider, withPacing } from "@gatesai/providers";
 import type { Provider } from "@gatesai/providers";
 import { makeFileSessionStore, SessionHistory, toolsMap, listSessions, createHarness, createHarnessRegistry } from "@gatesai/runtime";
 import type { Message, HarnessStreamEvent, HarnessResponse } from "@gatesai/runtime";
@@ -159,12 +159,22 @@ function pickBestProvider(
   const executionSlot = slots.find((s) => s.role === "execution");
   const model = executionSlot?.provider === providerType ? executionSlot.model : undefined;
 
-  switch (providerType) {
-    case "anthropic": return makeAnthropicProvider({ apiKey, model });
-    case "openai":    return makeOpenAIProvider({ apiKey, model });
-    case "minimax":
-    default:          return makeMiniMaxProvider({ apiKey, model });
+  // Use ClaudeCodeProvider when Anthropic OAuth token is configured.
+  // It spawns `claude -p` which uses subscription routing — no API rate limits.
+  // Falls back to direct API for non-OAuth keys (sk-ant-api) or other providers.
+  const isOAuthToken = providerType === "anthropic" && apiKey.startsWith("sk-ant-oat");
+  if (isOAuthToken) {
+    return makeClaudeCodeProvider({ model: model ?? "claude-sonnet-4-6" });
   }
+
+  let base: Provider;
+  switch (providerType) {
+    case "anthropic": base = makeAnthropicProvider({ apiKey, model }); break;
+    case "openai":    base = makeOpenAIProvider({ apiKey, model }); break;
+    case "minimax":
+    default:          base = makeMiniMaxProvider({ apiKey, model }); break;
+  }
+  return withPacing(base, { maxConcurrent: 3, minIntervalMs: 300, maxRetries: 5 });
 }
 
 // ── Message type bridge ───────────────────────────────────────────────────────
