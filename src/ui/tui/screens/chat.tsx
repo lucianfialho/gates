@@ -8,6 +8,7 @@ import { StatusBar } from "../components/status-bar.js";
 import { Sidebar, type SidebarData } from "../components/sidebar.js";
 import { SkillsList, type SkillInfo } from "./skills-list.js";
 import { KanbanBoard, type KanbanFinding } from "./kanban.js";
+import { ActiveThinking, ThinkingBlock, type ThinkingBlockData } from "../components/thinking-block.js";
 import type { LoadedHarness } from "../../harness/loader.js";
 import { DEFAULT_PORT } from "../../server/index.js";
 
@@ -213,8 +214,11 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
   const [cmdMenuIndex, setCmdMenuIndex]     = useState(0);
   const [scrollOffset, setScrollOffset]     = useState(0);
   const [projectContext, setProjectContext] = useState<{ cwd: string; repo: string | null }>({ cwd: ".", repo: null });
-  const [kanbanFindings, setKanbanFindings] = useState<KanbanFinding[] | null>(null);
-  const [kanbanRepo, setKanbanRepo]         = useState("");
+  const [kanbanFindings, setKanbanFindings]   = useState<KanbanFinding[] | null>(null);
+  const [kanbanRepo, setKanbanRepo]           = useState("");
+  const [thinkingBlocks, setThinkingBlocks]   = useState<ThinkingBlockData[]>([]);
+  const [activeThinking, setActiveThinking]   = useState("");
+  const thinkingStartRef                      = useRef<number>(Date.now());
   const suppressNextAssistant               = useRef(false);
   const streamingMsgId = useRef<string | null>(null);
   const abortRef       = useRef<AbortController | null>(null);
@@ -283,6 +287,12 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
         setInput("");
         return;
       }
+    }
+
+    // ── Toggle thinking blocks with 't' ─────────────────────────────────────
+    if (char === "t" && !input && thinkingBlocks.length > 0) {
+      setThinkingBlocks((prev) => prev.map((b) => ({ ...b, collapsed: !b.collapsed })));
+      return;
     }
 
     // ── Message scroll (↑↓ when menu closed, input empty) ───────────────────
@@ -462,6 +472,9 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
     setStreamingContent("");
     setKanbanFindings(null);
     setKanbanRepo(repo);
+    setThinkingBlocks([]);
+    setActiveThinking("");
+    thinkingStartRef.current = Date.now();
     kanbanRef.current = null;
     suppressNextAssistant.current = false;
 
@@ -506,39 +519,49 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
                 const first = Object.entries(parsed)[0];
                 if (first) argPreview = `${first[0]}=${String(first[1]).slice(0, 50)}`;
               } catch { argPreview = rawArgs?.slice(0, 50) ?? ""; }
-              currentToolRef.current = `${name}(${argPreview})`;
+
+              // Commit current thinking as a collapsed block
+              setActiveThinking((current) => {
+                if (current.trim()) {
+                  setThinkingBlocks((prev) => [...prev, {
+                    id: crypto.randomUUID(),
+                    text: current,
+                    durationMs: Date.now() - thinkingStartRef.current,
+                    collapsed: false, // start expanded, user can collapse
+                  }]);
+                }
+                return "";
+              });
+              thinkingStartRef.current = Date.now();
+
               setStatus("tool_calling");
               setToolCalls([{ id: d.id as string, name, args: rawArgs, status: "running" }]);
-              // Don't clear streamingContent — keep the thinking text visible while tool runs
               break;
             }
 
             case "tool_result":
               setToolCalls([]);
               setStatus("thinking");
+              thinkingStartRef.current = Date.now();
               break;
 
             case "delta": {
-              // Accumulate thinking text — shown in the message area as Claude reasons
               const text = (d.text as string) ?? "";
-              // Skip if it looks like raw JSON output (findings) to avoid showing raw data
+              // Skip raw JSON findings output
               if (!text.startsWith('[{"title"') && !text.startsWith('{"title"')) {
-                setStreamingContent((prev) => {
-                  // Keep last 500 chars visible — prevents giant walls of text
-                  const next = prev + text;
-                  return next.length > 500 ? "…" + next.slice(-480) : next;
-                });
+                setActiveThinking((prev) => prev + text);
               }
               break;
             }
 
             case "kanban_update": {
-              // All state in one batch — prevents multiple re-renders
               const findings = d.findings as KanbanFinding[];
               kanbanRef.current = findings;
               setKanbanFindings(findings);
               setToolCalls([]);
               setStreamingContent("");
+              setActiveThinking("");
+              setThinkingBlocks([]);
               setStatus("idle");
               break;
             }
@@ -732,7 +755,31 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
           ) : (
             <Box flexDirection="column" flexGrow={1} overflow="hidden">
               {skillExec && <SkillExecution execution={skillExec} />}
-              <MessageList messages={displayMessages} toolCalls={toolCalls} maxHeight={height - 6} width={mainWidth} scrollOffset={scrollOffset} />
+
+              {/* Thinking blocks — shown during code review */}
+              {(thinkingBlocks.length > 0 || activeThinking) && (
+                <Box flexDirection="column" marginBottom={1}>
+                  {thinkingBlocks.map((block) => (
+                    <ThinkingBlock
+                      key={block.id}
+                      block={block}
+                      onToggle={(id) =>
+                        setThinkingBlocks((prev) =>
+                          prev.map((b) => b.id === id ? { ...b, collapsed: !b.collapsed } : b)
+                        )
+                      }
+                    />
+                  ))}
+                  {activeThinking && <ActiveThinking text={activeThinking} />}
+                  {thinkingBlocks.length > 0 && (
+                    <Box paddingLeft={2}>
+                      <Text dimColor>t para recolher/expandir todos</Text>
+                    </Box>
+                  )}
+                </Box>
+              )}
+
+              <MessageList messages={displayMessages} toolCalls={toolCalls} maxHeight={height - 6 - (thinkingBlocks.length > 0 || activeThinking ? 6 : 0)} width={mainWidth} scrollOffset={scrollOffset} />
             </Box>
           )}
         </Box>
