@@ -443,14 +443,83 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
         return;
       }
 
-      const focusClause = cmd.reviewFocus ? ` com foco em ${cmd.reviewFocus}` : "";
-      const reviewMsg   = `revisa o código em ${reviewPath}${focusClause} no repo ${reviewRepo}`;
       setInput("");
-      return void sendChatMessage(reviewMsg);
+      return void runCodeReview(reviewPath, reviewRepo, cmd.reviewFocus);
     }
 
     await sendChatMessage(text);
   }, [input, status, sessionId, runSkill]);
+
+  // ── Run code review via dedicated endpoint ───────────────────────────────────
+
+  const runCodeReview = useCallback(async (path: string, repo: string, focus?: string) => {
+    setStatus("thinking");
+    setToolCalls([]);
+    setKanbanFindings(null);
+    setKanbanRepo(repo);
+    suppressNextAssistant.current = false;
+
+    setMessages((prev) => [...prev, {
+      id: crypto.randomUUID(), role: "user",
+      content: `/code-review ${path} ${repo}${focus ? ` ${focus}` : ""}`,
+      timestamp: Date.now(),
+    }]);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const res = await fetch(`http://localhost:${DEFAULT_PORT}/api/code-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, repo, focus, maxIssues: 10, dryRun: false }),
+        signal: controller.signal,
+      });
+
+      const reader  = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let sseBuffer = "";
+
+      while (reader) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const { buffer, events } = parseSseChunk(sseBuffer, decoder.decode(value, { stream: true }));
+        sseBuffer = buffer;
+
+        for (const { type, data } of events) {
+          const d = data as Record<string, unknown>;
+          switch (type) {
+            case "start":    setStatus("thinking"); break;
+            case "tool_call":
+              setStatus("tool_calling");
+              setToolCalls((prev) => [...prev, { id: d.id as string, name: d.name as string, args: d.args as string ?? d.args as string, status: "running" }]);
+              break;
+            case "tool_result":
+              setToolCalls((prev) => prev.map((tc) => tc.id === (d.id as string)
+                ? { ...tc, output: d.output as string, isError: !!d.isError, status: (d.isError ? "error" : "done") as ToolCallItem["status"] }
+                : tc));
+              break;
+            case "kanban_update":
+              setKanbanFindings(d.findings as KanbanFinding[]);
+              setToolCalls([]);
+              setStatus("idle");
+              break;
+            case "done":
+              if (!kanbanFindings) setStatus("idle");
+              break;
+            case "error":
+              setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "system", content: `Error: ${d.message}`, timestamp: Date.now() }]);
+              setStatus("error");
+              setTimeout(() => setStatus("idle"), 2000);
+              break;
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") { setStatus("error"); setTimeout(() => setStatus("idle"), 2000); }
+      else { setStatus("idle"); setToolCalls([]); }
+    }
+  }, [sessionId, kanbanFindings]);
 
   const sendChatMessage = useCallback(async (text: string) => {
     if (!text || status !== "idle") return;

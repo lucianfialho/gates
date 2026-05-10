@@ -792,6 +792,56 @@ export function createServer(harnesses: LoadedHarness[], serverTools?: ServerToo
     });
   });
 
+  // ── Code Review — dedicated endpoint ────────────────────────────────────────
+  // Runs the code-review harness directly, streaming kanban_update + tool_call events.
+
+  app.post("/api/code-review", (c) => {
+    return stream(c, async (s) => {
+      const write = (type: string, data: unknown) => s.write(sse(type, data));
+      try {
+        const { path: reviewPath = ".", repo, focus, maxIssues = 5, dryRun = false } =
+          await c.req.json<{ path?: string; repo?: string; focus?: string; maxIssues?: number; dryRun?: boolean }>();
+
+        if (!repo) { await write("error", { message: "repo is required" }); return; }
+
+        const codeReviewHarness = harnesses.find((h) => h.name === "Code Review");
+        if (!codeReviewHarness?.def) {
+          await write("error", {
+            message: "Code Review harness não encontrado. Rode gates dentro de um projeto com .gates/harnesses/code-review/",
+          });
+          return;
+        }
+
+        await write("start", { path: reviewPath, repo });
+
+        const sandbox = await Effect.runPromise(makeLocalSandbox({ cwd: process.cwd() }));
+        const allTools: Map<string, import("@gatesai/runtime").Tool> = new Map(toolsMap(sandbox));
+        if (serverTools) {
+          for (const [name, tool] of serverTools.connectorTools) allTools.set(name, tool);
+        }
+
+        const registry = getRegistry(allTools);
+
+        const saved = readSavedKeys();
+        const env: Record<string, string> = {
+          GITHUB_TOKEN: process.env.GH_TOKEN ?? saved["github"] ?? "",
+          GH_TOKEN:     process.env.GH_TOKEN ?? saved["github"] ?? "",
+        };
+
+        const onEvent = (e: HarnessStreamEvent) => { write(e.type, e).catch(() => {}); };
+
+        const result = await Effect.runPromise(
+          registry.run("code-review", { path: reviewPath, repo, focus, maxIssues, dryRun }, env, { onEvent })
+        );
+
+        await write("done", { result });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await write("error", { message: msg });
+      }
+    });
+  });
+
   app.get("/api/sessions/:id/history", async (c) => {
     const sessionId = c.req.param("id");
     const store = await Effect.runPromise(makeFileSessionStore());
