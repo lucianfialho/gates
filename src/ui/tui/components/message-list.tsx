@@ -23,22 +23,24 @@ interface Props {
   toolCalls: ToolCallItem[];
   maxHeight: number;
   width?: number;
+  /** Lines scrolled up from the bottom. 0 = newest visible (default). */
+  scrollOffset?: number;
 }
 
 // ── Line estimation ────────────────────────────────────────────────────────────
 
 function estimateMessageLines(msg: ChatMessage, contentWidth: number): number {
-  let lines = 1; // header row (role + time)
+  let lines = 1; // header row
   for (const line of msg.content.split("\n")) {
     lines += Math.max(1, Math.ceil((line.length || 1) / contentWidth));
   }
-  return lines + 1; // +1 for marginBottom
+  return lines + 1; // marginBottom
 }
 
 // ── ToolCall ───────────────────────────────────────────────────────────────────
 
 function ToolCall({ call }: { call: ToolCallItem }) {
-  const icon = call.status === "running" ? "⟳" : call.isError ? "✗" : "✓";
+  const icon  = call.status === "running" ? "⟳" : call.isError ? "✗" : "✓";
   const color = call.status === "running" ? "yellow" : call.isError ? "red" : "green";
 
   let argsPreview = "";
@@ -70,70 +72,73 @@ function ToolCall({ call }: { call: ToolCallItem }) {
 
 // ── MessageList ────────────────────────────────────────────────────────────────
 
-export function MessageList({ messages, toolCalls, maxHeight, width = 80 }: Props) {
-  const contentWidth = Math.max(20, width - 8);
+export function MessageList({ messages, toolCalls, maxHeight, width = 80, scrollOffset = 0 }: Props) {
+  const contentWidth    = Math.max(20, width - 8);
+  const toolLines       = toolCalls.length > 0 ? toolCalls.length * 2 + 2 : 0;
+  const scrollIndicator = 1;
+  const available       = Math.max(4, maxHeight - toolLines - scrollIndicator);
+  const isScrolled      = scrollOffset > 0;
 
-  // Lines consumed by tool calls panel
-  const toolLines = toolCalls.length > 0 ? toolCalls.length * 2 + 1 : 0;
-  const availableForMessages = Math.max(4, maxHeight - toolLines);
+  // ── Build visible window ───────────────────────────────────────────────────
+  // Walk backwards through messages, skipping `scrollOffset` lines from bottom,
+  // then filling `available` lines going further back.
 
-  // Fill visible messages from the END — newest messages always visible
+  let toSkip    = scrollOffset;  // lines still to skip
   let linesUsed = 0;
   const visibleMessages: ChatMessage[] = [];
+  const skippedAtBottom: ChatMessage[] = []; // messages hidden below scroll
 
   for (let i = messages.length - 1; i >= 0; i--) {
-    const est = estimateMessageLines(messages[i], contentWidth);
-    if (linesUsed + est > availableForMessages && visibleMessages.length > 0) break;
+    const msg = messages[i]!;
+    const est = estimateMessageLines(msg, contentWidth);
+
+    if (toSkip > 0) {
+      // Still in the skipped zone at the bottom
+      toSkip -= est;
+      skippedAtBottom.push(msg);
+      continue;
+    }
+
+    if (linesUsed + est > available && visibleMessages.length > 0) break;
     linesUsed += est;
-    visibleMessages.unshift(messages[i]);
+    visibleMessages.unshift(msg);
   }
 
-  const hiddenCount = messages.length - visibleMessages.length;
+  const hiddenAbove = messages.length - visibleMessages.length - skippedAtBottom.length;
+  const hiddenBelow = skippedAtBottom.length;
 
-  // For each message, cap content height so a single giant response
-  // doesn't push everything else off screen
+  // ── Content renderer ───────────────────────────────────────────────────────
+  // When scrolled: show full message content (no cap — user is reading deliberately)
+  // When at bottom: cap very long messages to keep newest visible
   const renderContent = (msg: ChatMessage): string => {
-    const lines = msg.content.split("\n");
-    // Max lines we'll display for a single message
-    const cap = Math.max(8, Math.floor(availableForMessages * 0.75));
-    if (lines.length <= cap) return msg.content;
+    if (isScrolled || msg.streaming) return msg.content;
 
-    if (msg.streaming) {
-      // During streaming show the LAST lines (tail follows new output)
-      return "…\n" + lines.slice(-cap).join("\n");
-    }
-    // Completed messages: show tail so user sees the end
+    const lines = msg.content.split("\n");
+    const cap   = Math.max(8, Math.floor(available * 0.75));
+    if (lines.length <= cap) return msg.content;
     return "…\n" + lines.slice(-cap).join("\n");
   };
 
   return (
     <Box flexDirection="column" flexGrow={1} overflow="hidden">
-      {/* Scroll indicator */}
-      {hiddenCount > 0 && (
-        <Box paddingLeft={2}>
-          <Text dimColor>↑ {hiddenCount} earlier message{hiddenCount > 1 ? "s" : ""} (scroll up in terminal)</Text>
-        </Box>
-      )}
 
+      {/* ── Top indicator ── */}
+      <Box paddingLeft={2}>
+        {hiddenAbove > 0
+          ? <Text dimColor>↑ {hiddenAbove} mensagem{hiddenAbove > 1 ? "s" : ""} acima  (↑ para subir)</Text>
+          : <Text dimColor> </Text>
+        }
+      </Box>
+
+      {/* ── Messages ── */}
       {visibleMessages.map((msg) => (
         <Box key={msg.id} flexDirection="column" marginBottom={1}>
           <Box>
-            <Text
-              bold
-              color={
-                msg.role === "user" ? "cyan"
-                : msg.role === "assistant" ? "green"
-                : "yellow"
-              }
-            >
+            <Text bold color={msg.role === "user" ? "cyan" : msg.role === "assistant" ? "green" : "yellow"}>
               {msg.role === "user" ? "You" : msg.role === "assistant" ? "Agent" : "System"}
             </Text>
             <Text dimColor>
-              {" "}
-              {new Date(msg.timestamp).toLocaleTimeString("pt-BR", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+              {" "}{new Date(msg.timestamp).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
             </Text>
             {msg.streaming && <Text color="yellow"> ●</Text>}
           </Box>
@@ -143,12 +148,17 @@ export function MessageList({ messages, toolCalls, maxHeight, width = 80 }: Prop
         </Box>
       ))}
 
-      {/* Active tool calls — always at the bottom */}
-      {toolCalls.length > 0 && (
+      {/* ── Tool calls (only when at bottom) ── */}
+      {!isScrolled && toolCalls.length > 0 && (
         <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-          {toolCalls.map((tc) => (
-            <ToolCall key={tc.id} call={tc} />
-          ))}
+          {toolCalls.map((tc) => <ToolCall key={tc.id} call={tc} />)}
+        </Box>
+      )}
+
+      {/* ── Bottom indicator ── */}
+      {hiddenBelow > 0 && (
+        <Box paddingLeft={2}>
+          <Text color="cyan">↓ {hiddenBelow} mensagem{hiddenBelow > 1 ? "s" : ""} abaixo  (↓ para descer)</Text>
         </Box>
       )}
     </Box>

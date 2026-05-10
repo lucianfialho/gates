@@ -210,6 +210,7 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
   const [sidebarData, setSidebarData]       = useState<SidebarData | null>(null);
   const [showSidebar, setShowSidebar]       = useState(false);
   const [cmdMenuIndex, setCmdMenuIndex]     = useState(0);
+  const [scrollOffset, setScrollOffset]     = useState(0);
   const [projectContext, setProjectContext] = useState<{ cwd: string; repo: string | null }>({ cwd: ".", repo: null });
   const streamingMsgId = useRef<string | null>(null);
   const abortRef       = useRef<AbortController | null>(null);
@@ -248,6 +249,7 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
   // ── Reset menu index when filter changes ──────────────────────────────────────
 
   useEffect(() => { setCmdMenuIndex(0); }, [input]);
+  useEffect(() => { setScrollOffset(0); }, [messages.length]);
 
   // ── Global key handler ───────────────────────────────────────────────────────
 
@@ -277,6 +279,14 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
         setInput("");
         return;
       }
+    }
+
+    // ── Message scroll (↑↓ when menu closed, input empty) ───────────────────
+    if (!showCmdMenu && !input) {
+      if (key.upArrow)   { setScrollOffset((s) => s + 3); return; }
+      if (key.downArrow) { setScrollOffset((s) => Math.max(0, s - 3)); return; }
+      if (key.pageUp)    { setScrollOffset((s) => s + Math.floor((height - 6) / 2)); return; }
+      if (key.pageDown)  { setScrollOffset((s) => Math.max(0, s - Math.floor((height - 6) / 2))); return; }
     }
 
     // ── Sidebar toggle ───────────────────────────────────────────────────────
@@ -563,7 +573,7 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
           ) : (
             <Box flexDirection="column" flexGrow={1} overflow="hidden">
               {skillExec && <SkillExecution execution={skillExec} />}
-              <MessageList messages={displayMessages} toolCalls={toolCalls} maxHeight={height - 6} width={mainWidth} />
+              <MessageList messages={displayMessages} toolCalls={toolCalls} maxHeight={height - 6} width={mainWidth} scrollOffset={scrollOffset} />
             </Box>
           )}
         </Box>
