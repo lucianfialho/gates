@@ -452,11 +452,17 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
 
   // ── Run code review via dedicated endpoint ───────────────────────────────────
 
+  // Track latest tool call for display (ref = no re-render on update)
+  const currentToolRef = useRef<string>("");
+  const kanbanRef      = useRef<KanbanFinding[] | null>(null);
+
   const runCodeReview = useCallback(async (path: string, repo: string, focus?: string) => {
     setStatus("thinking");
     setToolCalls([]);
+    setStreamingContent("");
     setKanbanFindings(null);
     setKanbanRepo(repo);
+    kanbanRef.current = null;
     suppressNextAssistant.current = false;
 
     setMessages((prev) => [...prev, {
@@ -489,26 +495,57 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
         for (const { type, data } of events) {
           const d = data as Record<string, unknown>;
           switch (type) {
-            case "start":    setStatus("thinking"); break;
-            case "tool_call":
+            case "start": setStatus("thinking"); break;
+
+            case "tool_call": {
+              // Show only the current tool — no accumulation
+              const name = d.name as string;
+              const rawArgs = d.args as string;
+              let argPreview = "";
+              try {
+                const parsed = JSON.parse(rawArgs);
+                const first = Object.entries(parsed)[0];
+                if (first) argPreview = `${first[0]}=${String(first[1]).slice(0, 50)}`;
+              } catch { argPreview = rawArgs?.slice(0, 50) ?? ""; }
+              currentToolRef.current = `${name}(${argPreview})`;
               setStatus("tool_calling");
-              setToolCalls((prev) => [...prev, { id: d.id as string, name: d.name as string, args: d.args as string ?? d.args as string, status: "running" }]);
+              // Single-item list so the tool indicator updates without accumulating
+              setToolCalls([{ id: d.id as string, name, args: rawArgs, status: "running" }]);
+              setStreamingContent(""); // clear thinking text when new tool starts
               break;
+            }
+
             case "tool_result":
-              setToolCalls((prev) => prev.map((tc) => tc.id === (d.id as string)
-                ? { ...tc, output: d.output as string, isError: !!d.isError, status: (d.isError ? "error" : "done") as ToolCallItem["status"] }
-                : tc));
-              break;
-            case "kanban_update":
-              setKanbanFindings(d.findings as KanbanFinding[]);
+              // Tool done — clear the indicator, back to thinking
               setToolCalls([]);
+              setStatus("thinking");
+              break;
+
+            case "delta":
+              // Claude's thinking text — show as streaming content
+              setStreamingContent((prev) => prev + ((d.text as string) ?? ""));
+              break;
+
+            case "kanban_update": {
+              // All state in one batch — prevents multiple re-renders
+              const findings = d.findings as KanbanFinding[];
+              kanbanRef.current = findings;
+              setKanbanFindings(findings);
+              setToolCalls([]);
+              setStreamingContent("");
               setStatus("idle");
               break;
+            }
+
             case "done":
-              if (!kanbanFindings) setStatus("idle");
+              if (!kanbanRef.current) setStatus("idle");
+              setStreamingContent("");
               break;
+
             case "error":
               setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "system", content: `Error: ${d.message}`, timestamp: Date.now() }]);
+              setToolCalls([]);
+              setStreamingContent("");
               setStatus("error");
               setTimeout(() => setStatus("idle"), 2000);
               break;
@@ -517,9 +554,9 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
       }
     } catch (err) {
       if ((err as Error).name !== "AbortError") { setStatus("error"); setTimeout(() => setStatus("idle"), 2000); }
-      else { setStatus("idle"); setToolCalls([]); }
+      else { setStatus("idle"); setToolCalls([]); setStreamingContent(""); }
     }
-  }, [sessionId, kanbanFindings]);
+  }, [sessionId]); // removed kanbanFindings — use ref to avoid recreating callback
 
   const sendChatMessage = useCallback(async (text: string) => {
     if (!text || status !== "idle") return;
