@@ -799,8 +799,8 @@ export function createServer(harnesses: LoadedHarness[], serverTools?: ServerToo
     return stream(c, async (s) => {
       const write = (type: string, data: unknown) => s.write(sse(type, data));
       try {
-        const { path: reviewPath = ".", repo, focus, maxIssues = 5, dryRun = false } =
-          await c.req.json<{ path?: string; repo?: string; focus?: string; maxIssues?: number; dryRun?: boolean }>();
+        const { path: reviewPath = ".", repo, focus, maxIssues = 5, dryRun = false, model: reviewModel } =
+          await c.req.json<{ path?: string; repo?: string; focus?: string; maxIssues?: number; dryRun?: boolean; model?: string }>();
 
         if (!repo) { await write("error", { message: "repo is required" }); return; }
 
@@ -820,19 +820,44 @@ export function createServer(harnesses: LoadedHarness[], serverTools?: ServerToo
           for (const [name, tool] of serverTools.connectorTools) allTools.set(name, tool);
         }
 
-        const registry = getRegistry(allTools);
-
         const saved = readSavedKeys();
         const env: Record<string, string> = {
           GITHUB_TOKEN: process.env.GH_TOKEN ?? saved["github"] ?? "",
           GH_TOKEN:     process.env.GH_TOKEN ?? saved["github"] ?? "",
         };
 
+        // Build review-specific registry.
+        // If model is specified, override the provider — supports haiku/minimax for faster streaming.
+        // haiku:  cheaper, higher rate limits, explicit tool loop (delta events per step)
+        // minimax: no OAuth rate limits
+        // claude-code (default): subprocess, subscription routing
+        const reviewRegistry = (() => {
+          const { loadConnectors: _lc, ..._ } = {} as Record<string, unknown>; void _lc; void _;
+          let reviewProvider: Provider = pickBestProvider(allTools, serverTools?.connectorDocs ?? "");
+
+          if (reviewModel) {
+            const apiKey = process.env["ANTHROPIC_API_KEY"] ?? saved["anthropic"] ?? "";
+            const mmKey  = process.env["MINIMAX_API_KEY"]   ?? saved["minimax"]   ?? "";
+            if (reviewModel.startsWith("claude-haiku") || reviewModel.startsWith("claude-sonnet") || reviewModel.startsWith("claude-opus")) {
+              reviewProvider = withPacing(makeAnthropicProvider({ apiKey, model: reviewModel }), { maxConcurrent: 2, minIntervalMs: 500, maxRetries: 5 });
+            } else if (reviewModel === "minimax" || reviewModel.startsWith("MiniMax")) {
+              reviewProvider = withPacing(makeMiniMaxProvider({ apiKey: mmKey, model: reviewModel === "minimax" ? undefined : reviewModel }), { maxConcurrent: 2, minIntervalMs: 500, maxRetries: 3 });
+            }
+          }
+
+          const reg = createHarnessRegistry({
+            provider: reviewProvider,
+            tools: allTools,
+            systemPromptSuffix: serverTools?.connectorDocs ?? "",
+          });
+          reg.register(codeReviewHarness.name, codeReviewHarness.def as import("@gatesai/runtime").FunctionalHarnessDef);
+          return reg;
+        })();
+
         const onEvent = (e: HarnessStreamEvent) => { write(e.type, e).catch(() => {}); };
 
-        // Use the harness's actual registered name (e.g. "Code Review"), not a hardcoded string
         const result = await Effect.runPromise(
-          registry.run(codeReviewHarness.name, { path: reviewPath, repo, focus, maxIssues, dryRun }, env, { onEvent })
+          reviewRegistry.run(codeReviewHarness.name, { path: reviewPath, repo, focus, maxIssues, dryRun }, env, { onEvent })
         );
 
         await write("done", { result });

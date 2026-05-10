@@ -478,7 +478,7 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
       const res = await fetch(`http://localhost:${DEFAULT_PORT}/api/code-review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, repo, focus, maxIssues: 10, dryRun: false }),
+        body: JSON.stringify({ path, repo, focus, maxIssues: 10, dryRun: false, model: "claude-haiku-4-5-20251001" }),
         signal: controller.signal,
       });
 
