@@ -360,6 +360,27 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
   const sendMessage = useCallback(async () => {
     const text = input.trim();
     if (!text || status !== "idle") return;
+
+    // If command menu is open, Enter completes the selected command — never submits raw "/"
+    if (showCmdMenu && filteredCommands.length > 0) {
+      const selected = filteredCommands[cmdMenuIndex];
+      if (selected) {
+        setInput(`/${selected.name} `);
+      }
+      return;
+    }
+
+    // Don't send a bare "/" or incomplete command to the AI
+    if (text.startsWith("/") && parseCommand(text).type === "none") {
+      setMessages((prev) => [...prev, {
+        id: crypto.randomUUID(), role: "system",
+        content: `Comando desconhecido: "${text}"\nDigite / para ver os comandos disponíveis.`,
+        timestamp: Date.now(),
+      }]);
+      setInput("");
+      return;
+    }
+
     setInput("");
     setCmdMenuIndex(0);
 
