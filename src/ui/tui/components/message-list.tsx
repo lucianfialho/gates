@@ -22,7 +22,20 @@ interface Props {
   messages: ChatMessage[];
   toolCalls: ToolCallItem[];
   maxHeight: number;
+  width?: number;
 }
+
+// ── Line estimation ────────────────────────────────────────────────────────────
+
+function estimateMessageLines(msg: ChatMessage, contentWidth: number): number {
+  let lines = 1; // header row (role + time)
+  for (const line of msg.content.split("\n")) {
+    lines += Math.max(1, Math.ceil((line.length || 1) / contentWidth));
+  }
+  return lines + 1; // +1 for marginBottom
+}
+
+// ── ToolCall ───────────────────────────────────────────────────────────────────
 
 function ToolCall({ call }: { call: ToolCallItem }) {
   const icon = call.status === "running" ? "⟳" : call.isError ? "✗" : "✓";
@@ -55,12 +68,54 @@ function ToolCall({ call }: { call: ToolCallItem }) {
   );
 }
 
-export function MessageList({ messages, toolCalls, maxHeight }: Props) {
-  const visible = messages.slice(-Math.floor(maxHeight / 3));
+// ── MessageList ────────────────────────────────────────────────────────────────
+
+export function MessageList({ messages, toolCalls, maxHeight, width = 80 }: Props) {
+  const contentWidth = Math.max(20, width - 8);
+
+  // Lines consumed by tool calls panel
+  const toolLines = toolCalls.length > 0 ? toolCalls.length * 2 + 1 : 0;
+  const availableForMessages = Math.max(4, maxHeight - toolLines);
+
+  // Fill visible messages from the END — newest messages always visible
+  let linesUsed = 0;
+  const visibleMessages: ChatMessage[] = [];
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const est = estimateMessageLines(messages[i], contentWidth);
+    if (linesUsed + est > availableForMessages && visibleMessages.length > 0) break;
+    linesUsed += est;
+    visibleMessages.unshift(messages[i]);
+  }
+
+  const hiddenCount = messages.length - visibleMessages.length;
+
+  // For each message, cap content height so a single giant response
+  // doesn't push everything else off screen
+  const renderContent = (msg: ChatMessage): string => {
+    const lines = msg.content.split("\n");
+    // Max lines we'll display for a single message
+    const cap = Math.max(8, Math.floor(availableForMessages * 0.75));
+    if (lines.length <= cap) return msg.content;
+
+    if (msg.streaming) {
+      // During streaming show the LAST lines (tail follows new output)
+      return "…\n" + lines.slice(-cap).join("\n");
+    }
+    // Completed messages: show tail so user sees the end
+    return "…\n" + lines.slice(-cap).join("\n");
+  };
 
   return (
     <Box flexDirection="column" flexGrow={1} overflow="hidden">
-      {visible.map((msg) => (
+      {/* Scroll indicator */}
+      {hiddenCount > 0 && (
+        <Box paddingLeft={2}>
+          <Text dimColor>↑ {hiddenCount} earlier message{hiddenCount > 1 ? "s" : ""} (scroll up in terminal)</Text>
+        </Box>
+      )}
+
+      {visibleMessages.map((msg) => (
         <Box key={msg.id} flexDirection="column" marginBottom={1}>
           <Box>
             <Text
@@ -83,12 +138,12 @@ export function MessageList({ messages, toolCalls, maxHeight }: Props) {
             {msg.streaming && <Text color="yellow"> ●</Text>}
           </Box>
           <Box paddingLeft={2}>
-            <Text wrap="wrap">{msg.content}</Text>
+            <Text wrap="wrap">{renderContent(msg)}</Text>
           </Box>
         </Box>
       ))}
 
-      {/* Active tool calls displayed after last message, cleared on done */}
+      {/* Active tool calls — always at the bottom */}
       {toolCalls.length > 0 && (
         <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
           {toolCalls.map((tc) => (

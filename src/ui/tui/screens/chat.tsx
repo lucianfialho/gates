@@ -438,7 +438,7 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
           ) : (
             <Box flexDirection="column" flexGrow={1} overflow="hidden">
               {skillExec && <SkillExecution execution={skillExec} />}
-              <MessageList messages={displayMessages} toolCalls={toolCalls} maxHeight={height - 6} />
+              <MessageList messages={displayMessages} toolCalls={toolCalls} maxHeight={height - 6} width={mainWidth} />
             </Box>
           )}
         </Box>
