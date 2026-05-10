@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "dev": "node --import tsx/esm src/index.ts"
+    "dev": "node --import tsx/esm src/index.ts",
+    "postinstall": "node -e \"const{mkdirSync,cpSync,existsSync}=require('fs'),{join}=require('path'),h=require('os').homedir();const src=join(__dirname,'connectors');const dst=join(h,'.gates','connectors');if(existsSync(src)){mkdirSync(dst,{recursive:true});cpSync(src,dst,{recursive:true});}\""
   },
   "dependencies": {
     "@gatesai/core": "^0.1.0",

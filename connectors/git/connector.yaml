@@ -1,0 +1,31 @@
+name: git
+description: Git version control operations with safe command allowlist
+version: "1.0"
+
+commands:
+  - name: git
+    description: "Run git commands — status, log, diff, add, commit, push, pull, checkout, branch"
+    executable: git
+    allowedSubcommands:
+      - status
+      - log
+      - diff
+      - add
+      - commit
+      - push
+      - pull
+      - checkout
+      - branch
+      - stash
+      - show
+    baseArgs:
+      - "--no-pager"
+    env:
+      GIT_AUTHOR_NAME: "{{credentials.GIT_AUTHOR_NAME}}"
+      GIT_AUTHOR_EMAIL: "{{credentials.GIT_AUTHOR_EMAIL}}"
+
+skills:
+  - skills/commit.yaml
+
+docs:
+  - docs/conventions.md

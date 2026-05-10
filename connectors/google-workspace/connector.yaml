@@ -1,0 +1,35 @@
+name: google-workspace
+description: Google Calendar, Meet e Drive via gws CLI
+version: "1.0"
+
+requiredCredentials:
+  - GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE  # caminho para o credentials.json
+
+commands:
+  - name: gws_calendar
+    description: "Lista reuniões do Google Calendar. Ex: args='calendar +agenda --week'"
+    executable: gws
+    allowedSubcommands:
+      - calendar
+    env:
+      GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE: "{{credentials.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE}}"
+
+  - name: gws_meet
+    description: "Acessa conference records, transcrições e participantes do Google Meet. Ex: args='meet conferenceRecords list'"
+    executable: gws
+    allowedSubcommands:
+      - meet
+    env:
+      GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE: "{{credentials.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE}}"
+
+  - name: gws_drive
+    description: "Lista e lê arquivos do Google Drive. Ex: args='drive files list --params {\"pageSize\":10}'"
+    executable: gws
+    allowedSubcommands:
+      - drive
+    env:
+      GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE: "{{credentials.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE}}"
+
+docs:
+  - docs/setup.md
+  - docs/gws-guide.md

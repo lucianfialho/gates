@@ -48,20 +48,33 @@ async function buildDefaultHarness(): Promise<HarnessConfig> {
     : (process.env.OPENAI_API_KEY ?? saved["openai"]) ? "openai"
     : "minimax";
 
-  // Load connector knowledge via registry.allDocs()
+  // Load connector knowledge from multiple locations (merged)
+  // Order: global (~/.gates/connectors) + project (cwd/.gates/connectors)
+  const credentials = {
+    GH_TOKEN: process.env.GH_TOKEN ?? saved["github"] ?? "",
+    GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE:
+      process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ?? saved["google-workspace"] ?? "",
+  };
+
   let connectorDocs = "";
   try {
     const { loadConnectors } = await import("@gatesai/skills");
-    const connectorDir = `${process.cwd()}/.gates/connectors`;
-    const registry = await Effect.runPromise(
-      loadConnectors(connectorDir, {
-        GH_TOKEN: process.env.GH_TOKEN ?? saved["github"] ?? "",
-        GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE:
-          process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ?? saved["google-workspace"] ?? "",
-      })
-    );
-    const docs = registry.allDocs();
-    if (docs.trim()) connectorDocs = `\n\n## Tool Reference\n\n${docs}`;
+    const connectorPaths = [
+      path.join(os.homedir(), ".gates", "connectors"),  // global — always loaded
+      path.join(process.cwd(), ".gates", "connectors"), // project-level
+    ];
+
+    const allDocs: string[] = [];
+    for (const dir of connectorPaths) {
+      const result = await Effect.runPromise(Effect.result(loadConnectors(dir, credentials)));
+      if (result._tag === "Success") {
+        const docs = result.success.allDocs();
+        if (docs.trim()) allDocs.push(docs);
+      }
+    }
+
+    const combined = allDocs.join("\n\n---\n\n");
+    if (combined.trim()) connectorDocs = `\n\n## Tool Reference\n\n${combined}`;
   } catch { /* connectors optional */ }
 
   // Generic harness — behavior rules only, no domain knowledge

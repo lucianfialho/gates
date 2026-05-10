@@ -1,0 +1,27 @@
+name: git-commit
+description: Stage and commit changes with a meaningful message
+initialState: status
+states:
+  - id: status
+    tool: git
+    params:
+      args: "status -s"
+  - id: generate_message
+    prompt: |
+      Based on these changed files:
+      {{lastOutput}}
+
+      Generate a concise conventional commit message (feat/fix/docs/refactor/test).
+      Return ONLY the commit message, nothing else.
+  - id: commit
+    tool: git
+    params:
+      args: "commit -am \"{{lastOutput}}\""
+    onSuccess: done
+    onFail: done
+  - id: done
+transitions:
+  - from: status
+    to: generate_message
+  - from: generate_message
+    to: commit

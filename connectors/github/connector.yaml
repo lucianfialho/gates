@@ -1,0 +1,21 @@
+name: github
+description: GitHub Issues — cria e lista issues via gh CLI
+version: "1.0"
+
+requiredCredentials:
+  - GH_TOKEN   # token do GitHub (ou configure via 'gh auth login')
+
+commands:
+  - name: gh
+    description: "GitHub CLI — cria issues, PRs, e gerencia repositórios"
+    executable: gh
+    allowedSubcommands:
+      - issue
+      - pr
+      - repo
+      - api
+    env:
+      GH_TOKEN: "{{credentials.GH_TOKEN}}"
+
+docs:
+  - docs/github-guide.md
