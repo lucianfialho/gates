@@ -7,6 +7,7 @@ import { Spinner } from "../components/spinner.js";
 import { StatusBar } from "../components/status-bar.js";
 import { Sidebar, type SidebarData } from "../components/sidebar.js";
 import { SkillsList, type SkillInfo } from "./skills-list.js";
+import { KanbanBoard, type KanbanFinding } from "./kanban.js";
 import type { LoadedHarness } from "../../harness/loader.js";
 import { DEFAULT_PORT } from "../../server/index.js";
 
@@ -212,6 +213,9 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
   const [cmdMenuIndex, setCmdMenuIndex]     = useState(0);
   const [scrollOffset, setScrollOffset]     = useState(0);
   const [projectContext, setProjectContext] = useState<{ cwd: string; repo: string | null }>({ cwd: ".", repo: null });
+  const [kanbanFindings, setKanbanFindings] = useState<KanbanFinding[] | null>(null);
+  const [kanbanRepo, setKanbanRepo]         = useState("");
+  const suppressNextAssistant               = useRef(false);
   const streamingMsgId = useRef<string | null>(null);
   const abortRef       = useRef<AbortController | null>(null);
 
@@ -503,8 +507,22 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
               setSidebarData(d as unknown as SidebarData);
               if (!showSidebar) setShowSidebar(true);
               break;
+            case "kanban_update": {
+              const findings = d.findings as KanbanFinding[];
+              setKanbanFindings(findings);
+              setKanbanRepo(projectContext.repo ?? "");
+              setStreamingContent("");
+              setToolCalls([]);
+              setStatus("idle");
+              suppressNextAssistant.current = true;
+              break;
+            }
             case "done":
-              setMessages((prev) => [...prev, { id: assistantId, role: "assistant" as const, content: d.content as string, timestamp: Date.now() }]);
+              if (suppressNextAssistant.current) {
+                suppressNextAssistant.current = false;
+              } else {
+                setMessages((prev) => [...prev, { id: assistantId, role: "assistant" as const, content: d.content as string, timestamp: Date.now() }]);
+              }
               setStreamingContent(""); setToolCalls([]); setStatus("idle");
               break;
             case "error":
@@ -528,6 +546,35 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
       <SkillsList
         onSelect={(skill: SkillInfo) => { setShowSkillsList(false); runSkill(skill.name, {}); }}
         onBack={() => setShowSkillsList(false)}
+      />
+    );
+  }
+
+  // ── Kanban overlay ────────────────────────────────────────────────────────────
+
+  if (kanbanFindings !== null) {
+    return (
+      <KanbanBoard
+        findings={kanbanFindings}
+        repo={kanbanRepo}
+        onClose={() => setKanbanFindings(null)}
+        onCreateIssue={(finding) => {
+          setKanbanFindings(null);
+          void sendChatMessage(
+            `cria issue no GitHub: ${finding.title}\n\n${finding.body}` +
+            (finding.file ? `\n\nFile: ${finding.file}${finding.line ? `:${finding.line}` : ""}` : "") +
+            `\n\nSeverity: ${finding.severity}\nLabels: ${finding.labels.join(", ")}`
+          );
+        }}
+        onCreateAll={(findings) => {
+          setKanbanFindings(null);
+          void sendChatMessage(
+            `cria issues no GitHub para todos os findings do code review:\n\n` +
+            findings.map((f, i) =>
+              `${i + 1}. [${f.severity.toUpperCase()}] ${f.title}${f.file ? ` (${f.file}${f.line ? `:${f.line}` : ""})` : ""}`
+            ).join("\n")
+          );
+        }}
       />
     );
   }
