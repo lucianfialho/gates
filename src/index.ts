@@ -142,6 +142,19 @@ program
   });
 
 program
+  .command("analyze")
+  .description("Monitor session logs and suggest harness behavioral improvements")
+  .option("-i, --interval <seconds>", "Check interval in seconds", "30")
+  .option("--once", "Run once and exit (no loop)", false)
+  .action(async (options) => {
+    const { analyzeLoop } = await import("./cli/commands/analyze.js");
+    await analyzeLoop({
+      interval: Number(options.interval),
+      once: options.once as boolean,
+    });
+  });
+
+program
   .command("onboarding")
   .description("Reset onboarding — open configuration wizard on next launch")
   .option("--now", "Open configuration wizard immediately", false)
