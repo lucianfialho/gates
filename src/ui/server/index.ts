@@ -325,6 +325,23 @@ export function createServer(harnesses: LoadedHarness[], serverTools?: ServerToo
     c.json({ slots: readModelSlots(), knownModels: KNOWN_MODELS })
   );
 
+  // Project context — cwd + git repo for /code-review auto-detection
+  app.get("/api/context", async (c) => {
+    const cwd = process.cwd();
+    let repo: string | null = null;
+    try {
+      const { execFile } = await import("child_process");
+      const { promisify } = await import("util");
+      const exec = promisify(execFile);
+      const { stdout } = await exec("git", ["remote", "get-url", "origin"], { cwd, timeout: 3000 });
+      const url = stdout.trim();
+      // Extract owner/repo from https://github.com/owner/repo.git or git@github.com:owner/repo.git
+      const match = url.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
+      if (match) repo = match[1] ?? null;
+    } catch { /* no git or no remote */ }
+    return c.json({ cwd, repo });
+  });
+
   // First launch detection — returns true once, then marks as seen
   app.get("/api/first-launch", (c) => {
     const existing = (() => {

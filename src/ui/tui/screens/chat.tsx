@@ -24,10 +24,10 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "code-review",
     description: "Revisa código e sugere melhorias",
-    usage: "/code-review <path> <repo> [focus]",
+    usage: "/code-review [path] [repo] [focus]  — detecta path e repo automaticamente",
     args: [
-      { name: "path", required: true, hint: "./packages/runtime" },
-      { name: "repo", required: true, hint: "owner/repo" },
+      { name: "path", required: false, hint: "./" },
+      { name: "repo", required: false, hint: "detectado do git" },
       { name: "focus", required: false, hint: "security" },
     ],
   },
@@ -209,6 +209,7 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
   const [sidebarData, setSidebarData]       = useState<SidebarData | null>(null);
   const [showSidebar, setShowSidebar]       = useState(false);
   const [cmdMenuIndex, setCmdMenuIndex]     = useState(0);
+  const [projectContext, setProjectContext] = useState<{ cwd: string; repo: string | null }>({ cwd: ".", repo: null });
   const streamingMsgId = useRef<string | null>(null);
   const abortRef       = useRef<AbortController | null>(null);
 
@@ -216,6 +217,14 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
   const showCmdMenu      = filteredCommands.length > 0 && status === "idle";
 
   useEffect(() => { setShowSidebar(width >= 110); }, [width]);
+
+  // Load project context (cwd + git repo) once on mount
+  useEffect(() => {
+    fetch(`http://localhost:${DEFAULT_PORT}/api/context`)
+      .then((r) => r.json())
+      .then((d: unknown) => setProjectContext(d as { cwd: string; repo: string | null }))
+      .catch(() => {});
+  }, []);
 
   // ── History load ─────────────────────────────────────────────────────────────
 
@@ -400,19 +409,28 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
     }
 
     if (cmd.type === "code-review") {
-      if (!cmd.reviewRepo) {
+      // Auto-fill from project context if not provided
+      const reviewPath = cmd.reviewPath ?? ".";
+      const reviewRepo = cmd.reviewRepo || projectContext.repo || "";
+
+      if (!reviewRepo) {
         setMessages((prev) => [...prev, {
           id: crypto.randomUUID(), role: "system",
-          content: "Usage: /code-review <path> <repo> [focus]\nExample: /code-review ./packages/runtime lucianfialho/effect-gates security",
+          content: [
+            "Repo não detectado. Use:",
+            "/code-review <repo>",
+            "/code-review <path> <repo> [focus]",
+            "",
+            `Exemplo: /code-review ${projectContext.cwd.split("/").slice(-2).join("/")} owner/repo security`,
+          ].join("\n"),
           timestamp: Date.now(),
         }]);
         return;
       }
-      // Convert to natural language message the harness understands
+
       const focusClause = cmd.reviewFocus ? ` com foco em ${cmd.reviewFocus}` : "";
-      const reviewMsg   = `revisa o código em ${cmd.reviewPath ?? "."}${focusClause} no repo ${cmd.reviewRepo}`;
+      const reviewMsg   = `revisa o código em ${reviewPath}${focusClause} no repo ${reviewRepo}`;
       setInput("");
-      // Fall through to send as chat message
       return void sendChatMessage(reviewMsg);
     }
 
