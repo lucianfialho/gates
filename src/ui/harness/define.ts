@@ -1,3 +1,8 @@
+export { defineHarness } from "@gatesai/runtime";
+export type { FunctionalHarnessDef } from "@gatesai/runtime";
+
+// ── YAML-style config harness (legacy / simple) ───────────────────────────────
+
 export interface HarnessRole {
   readonly name: string;
   readonly systemPrompt: string;
@@ -25,5 +30,3 @@ export interface HarnessConfig {
     readonly keepRecentMessages?: number;
   };
 }
-
-export const defineHarness = (config: HarnessConfig): HarnessConfig => config;

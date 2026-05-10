@@ -285,8 +285,8 @@ function buildRuntimeHarnessConfig(
 export function createServer(harnesses: LoadedHarness[], serverTools?: ServerToolState) {
   const app = new Hono();
 
-  // ── Default harness registry (rebuilt per request so live config changes are picked up) ──
-  const getDefaultRegistry = (allTools: Map<string, import("@gatesai/runtime").Tool>) => {
+  // ── Harness registry (rebuilt per request so live config changes are picked up) ──
+  const getRegistry = (allTools: Map<string, import("@gatesai/runtime").Tool>) => {
     const provider = pickBestProvider(allTools, serverTools?.connectorDocs ?? "");
     const registry = createHarnessRegistry({
       provider,
@@ -294,7 +294,12 @@ export function createServer(harnesses: LoadedHarness[], serverTools?: ServerToo
       roles: [gatesDefaultRole],
       systemPromptSuffix: serverTools?.connectorDocs ?? "",
     });
+    // Register built-in default harness
     registry.register("__default__", defaultHarnessDef as import("@gatesai/runtime").FunctionalHarnessDef);
+    // Register any functional harnesses discovered from .gates/harnesses/
+    for (const h of harnesses) {
+      if (h.def) registry.register(h.name, h.def as import("@gatesai/runtime").FunctionalHarnessDef);
+    }
     return registry;
   };
 
@@ -643,28 +648,32 @@ export function createServer(harnesses: LoadedHarness[], serverTools?: ServerToo
         let finalContent: string;
         let iterations: number;
 
-        if (meta.harnessName === "__default__") {
-          // ── Default harness: use defineHarness + createHarnessRegistry ──────
-          const saved = readSavedKeys();
-          const env: Record<string, string> = {
-            GITHUB_TOKEN: process.env.GH_TOKEN ?? saved["github"] ?? "",
-            GH_TOKEN: process.env.GH_TOKEN ?? saved["github"] ?? "",
-            ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? saved["anthropic"] ?? "",
-            OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? saved["openai"] ?? "",
-            MINIMAX_API_KEY: process.env.MINIMAX_API_KEY ?? saved["minimax"] ?? "",
-          };
+        const saved = readSavedKeys();
+        const env: Record<string, string> = {
+          GITHUB_TOKEN: process.env.GH_TOKEN ?? saved["github"] ?? "",
+          GH_TOKEN: process.env.GH_TOKEN ?? saved["github"] ?? "",
+          ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? saved["anthropic"] ?? "",
+          OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? saved["openai"] ?? "",
+          MINIMAX_API_KEY: process.env.MINIMAX_API_KEY ?? saved["minimax"] ?? "",
+        };
 
-          const registry = getDefaultRegistry(allTools);
+        const loadedHarness = harnesses.find((h) => h.name === meta.harnessName);
+        const isFunctional = meta.harnessName === "__default__" || loadedHarness?.def != null;
+
+        if (isFunctional) {
+          // ── Functional harness: route through registry ────────────────────
+          const registry = getRegistry(allTools);
+          const harnessName = meta.harnessName === "__default__" ? "__default__" : meta.harnessName;
           const response = await Effect.runPromise(
-            registry.run("__default__", { message: content }, env, { onEvent, initialHistory })
+            registry.run(harnessName, { message: content }, env, { onEvent, initialHistory })
           ) as HarnessResponse;
 
           finalContent = response.content;
           iterations = response.iterations ?? 0;
         } else {
-          // ── Named harness: existing YAML-config path ─────────────────────────
+          // ── YAML-config harness: existing path ────────────────────────────
           const harnessConfig: HarnessConfig =
-            harnesses.find((h) => h.name === meta.harnessName)?.config
+            loadedHarness?.config
             ?? { name: "Assistant", provider: { type: "minimax" }, tools: [] };
 
           const declaredToolNames = harnessConfig.tools ?? [];
