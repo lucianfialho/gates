@@ -672,11 +672,7 @@ export function createServer(harnesses: LoadedHarness[], serverTools?: ServerToo
         let finalContent = response.content;
         const iterations = response.iterations ?? 0;
 
-        // Retrieve updated history from the session (includes new user + assistant messages)
-        const updatedHistory = await Effect.runPromise(session.getHistory());
-
-        // Persist: rebuild from updated history
-        // We append only the new messages (last user + assistant pair) to the existing store
+        // Persist the new user + assistant pair to the file store
         const userMsg: Message = {
           id: crypto.randomUUID(),
           role: "user",
@@ -695,9 +691,6 @@ export function createServer(harnesses: LoadedHarness[], serverTools?: ServerToo
           sessionHistory.toData({ sessionId, harnessName: meta.harnessName })
         );
         await Effect.runPromise(store.save(storageKey, data));
-
-        // Suppress unused variable warning
-        void updatedHistory;
 
         // If model used tools but produced no final text, ask for a summary
         if (!finalContent.trim() && iterations > 0) {
