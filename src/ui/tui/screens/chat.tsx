@@ -3,6 +3,7 @@ import { Box, Text, useInput, useStdout } from "ink";
 import TextInput from "ink-text-input";
 import { MessageList, type ChatMessage, type ToolCallItem } from "../components/message-list.js";
 import { SkillExecution, type SkillExecutionState } from "../components/skill-execution.js";
+import { Spinner } from "../components/spinner.js";
 import { StatusBar } from "../components/status-bar.js";
 import { Sidebar, type SidebarData } from "../components/sidebar.js";
 import { SkillsList, type SkillInfo } from "./skills-list.js";
@@ -529,8 +530,13 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
   ];
 
   const statusLabel: Record<Status, string> = {
-    idle: "ready", thinking: "thinking…", tool_calling: "calling tools…",
-    streaming: "streaming…", running_skill: "running skill…", error: "error",
+    idle: "ready", thinking: "pensando…", tool_calling: "executando tools…",
+    streaming: "respondendo…", running_skill: "executando skill…", error: "erro",
+  };
+
+  const statusColor: Record<Status, string> = {
+    idle: "cyan", thinking: "yellow", tool_calling: "magenta",
+    streaming: "green", running_skill: "blue", error: "red",
   };
 
   const mainWidth = showSidebar && sidebarData ? width - SIDEBAR_WIDTH : width;
@@ -584,7 +590,7 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
               placeholder="Mensagem ou / para comandos…"
             />
           ) : (
-            <Text dimColor>{statusLabel[status]}</Text>
+            <Spinner label={statusLabel[status]} color={statusColor[status]} />
           )}
         </Box>
       </Box>
