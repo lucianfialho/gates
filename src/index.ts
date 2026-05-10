@@ -1,4 +1,24 @@
 #!/usr/bin/env node
+
+// ── Global crash guards ───────────────────────────────────────────────────────
+// Prevent EISDIR, ENOENT and similar fs errors from killing the process.
+// These can happen when the AI calls read() on a directory path.
+process.on("uncaughtException", (err: Error & { code?: string }) => {
+  if (err.code === "EISDIR" || err.code === "ENOENT" || err.code === "EACCES") {
+    // Swallow — the tool result will surface as an error to the agent
+    return;
+  }
+  // Re-throw anything else so real crashes still surface
+  console.error("[gates] uncaught exception:", err.message);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason: unknown) => {
+  const err = reason as Error & { code?: string };
+  if (err?.code === "EISDIR" || err?.code === "ENOENT") return;
+  console.error("[gates] unhandled rejection:", err?.message ?? reason);
+});
+
 import { Command } from "commander";
 
 const program = new Command();
