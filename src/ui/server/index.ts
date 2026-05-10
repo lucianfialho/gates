@@ -830,13 +830,18 @@ export function createServer(harnesses: LoadedHarness[], serverTools?: ServerToo
 
         const onEvent = (e: HarnessStreamEvent) => { write(e.type, e).catch(() => {}); };
 
+        // Use the harness's actual registered name (e.g. "Code Review"), not a hardcoded string
         const result = await Effect.runPromise(
-          registry.run("code-review", { path: reviewPath, repo, focus, maxIssues, dryRun }, env, { onEvent })
+          registry.run(codeReviewHarness.name, { path: reviewPath, repo, focus, maxIssues, dryRun }, env, { onEvent })
         );
 
         await write("done", { result });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        // HarnessError is a plain object { code, message } — not an Error instance
+        const msg = err instanceof Error
+          ? err.message
+          : (err as Record<string, unknown>)?.message as string
+            ?? JSON.stringify(err);
         await write("error", { message: msg });
       }
     });
