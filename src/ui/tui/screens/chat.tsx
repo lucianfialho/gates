@@ -498,7 +498,6 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
             case "start": setStatus("thinking"); break;
 
             case "tool_call": {
-              // Show only the current tool — no accumulation
               const name = d.name as string;
               const rawArgs = d.args as string;
               let argPreview = "";
@@ -509,22 +508,29 @@ export function Chat({ harness, sessionId, onBack, onOpenSessions }: Props) {
               } catch { argPreview = rawArgs?.slice(0, 50) ?? ""; }
               currentToolRef.current = `${name}(${argPreview})`;
               setStatus("tool_calling");
-              // Single-item list so the tool indicator updates without accumulating
               setToolCalls([{ id: d.id as string, name, args: rawArgs, status: "running" }]);
-              setStreamingContent(""); // clear thinking text when new tool starts
+              // Don't clear streamingContent — keep the thinking text visible while tool runs
               break;
             }
 
             case "tool_result":
-              // Tool done — clear the indicator, back to thinking
               setToolCalls([]);
               setStatus("thinking");
               break;
 
-            case "delta":
-              // Claude's thinking text — show as streaming content
-              setStreamingContent((prev) => prev + ((d.text as string) ?? ""));
+            case "delta": {
+              // Accumulate thinking text — shown in the message area as Claude reasons
+              const text = (d.text as string) ?? "";
+              // Skip if it looks like raw JSON output (findings) to avoid showing raw data
+              if (!text.startsWith('[{"title"') && !text.startsWith('{"title"')) {
+                setStreamingContent((prev) => {
+                  // Keep last 500 chars visible — prevents giant walls of text
+                  const next = prev + text;
+                  return next.length > 500 ? "…" + next.slice(-480) : next;
+                });
+              }
               break;
+            }
 
             case "kanban_update": {
               // All state in one batch — prevents multiple re-renders
