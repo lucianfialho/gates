@@ -43,9 +43,6 @@ program
 
     const { discoverHarnesses } = await import("./ui/harness/loader.js");
     const { startServer, DEFAULT_PORT } = await import("./ui/server/index.js");
-    const { render } = await import("ink");
-    const React = await import("react");
-    const { App } = await import("./ui/tui/app.js");
 
     const port = Number(options.port);
     const harnesses = await discoverHarnesses(dir);
@@ -67,8 +64,7 @@ program
       return;
     }
 
-    const { waitUntilExit } = render(React.default.createElement(App, { harnesses }));
-    await waitUntilExit();
+    await (await import("./ui/tui/index.js")).startTUI(harnesses);
     stopServer();
     process.exit(0);
   });

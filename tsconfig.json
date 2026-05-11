@@ -11,5 +11,10 @@
     "skipLibCheck": true,
     "types": ["bun-types"]
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*"],
+  "exclude": [
+    "src/ui/tui/app.tsx",
+    "src/ui/tui/components",
+    "src/ui/tui/screens"
+  ]
 }
