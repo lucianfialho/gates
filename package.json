@@ -9,7 +9,7 @@
   "scripts": {
     "build": "bun run tsc",
     "typecheck": "bun run tsc --noEmit",
-    "dev": "bun --bun run src/index.ts",
+    "dev": "bun run src/index.ts",
     "postinstall": "bun run -e \"const{mkdirSync,cpSync,existsSync}=require('fs'),{join}=require('path'),h=require('os').homedir();const src=join(__dirname,'connectors');const dst=join(h,'.gates','connectors');if(existsSync(src)){mkdirSync(dst,{recursive:true});cpSync(src,dst,{recursive:true});}\""
   },
   "dependencies": {
