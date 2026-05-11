@@ -9,7 +9,7 @@ import type { LoadedHarness } from "../../harness/loader.js";
 import { DEFAULT_PORT } from "../../server/index.js";
 
 export class HarnessSelectScreen {
-  private root: BoxRenderable;
+  root: BoxRenderable;
   private renderer: CliRenderer;
   private keyHandler: (key: { name: string; ctrl: boolean }) => void;
 
@@ -71,8 +71,6 @@ export class HarnessSelectScreen {
     });
     footer.add(footerText);
     this.root.add(footer);
-
-    renderer.root.add(this.root);
 
     this.keyHandler = (key: { name: string; ctrl: boolean }) => {
       if (key.name === "q" || key.name === "escape") renderer.destroy();

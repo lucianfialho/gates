@@ -14,7 +14,7 @@ import { parseSseChunk } from "../shared/sse.js";
 import { COLORS } from "../shared/colors.js";
 
 export class ChatScreen {
-  private root: BoxRenderable;
+  root: BoxRenderable;
   private renderer: CliRenderer;
   private ctx: RenderContext;
   private keyHandler: (key: { name: string; ctrl: boolean }) => void;
@@ -111,7 +111,6 @@ export class ChatScreen {
 
     this.root.add(footer);
 
-    renderer.root.add(this.root);
     renderer.focusRenderable(this.input);
 
     this.input.on(InputRenderableEvents.ENTER, () => {
