@@ -3,206 +3,166 @@ import {
   TextRenderable,
   InputRenderable,
   InputRenderableEvents,
-  ScrollBoxRenderable,
   MarkdownRenderable,
   SyntaxStyle,
 } from "@opentui/core";
-import type { CliRenderer, RenderContext } from "@opentui/core";
+import type { CliRenderer, ScrollbackSurface } from "@opentui/core";
 import type { LoadedHarness } from "../../harness/loader.js";
 import { DEFAULT_PORT } from "../../server/index.js";
 import { parseSseChunk } from "../shared/sse.js";
 import { COLORS } from "../shared/colors.js";
 
 export class ChatScreen {
-  root: BoxRenderable;
-  private renderer: CliRenderer;
-  private ctx: RenderContext;
-  private keyHandler: (key: { name: string; ctrl: boolean }) => void;
+  // split-footer layout:
+  //   scrollback surface  ← messages stream here (scrollable)
+  //   footer (3 lines)    ← header + input + status
 
-  private messagesBox: ScrollBoxRenderable;
-  private streamingText: TextRenderable;
-  private toolText: TextRenderable;
-  private statusText: TextRenderable;
+  private surface: ScrollbackSurface;
+  private footer: BoxRenderable;   // lives in renderer.root (footer area)
   private input: InputRenderable;
+  private statusText: TextRenderable;
 
+  private renderer: CliRenderer;
   private sessionId: string;
-  private syntaxStyle: SyntaxStyle;
-  private streamingContent = "";
   private sseBuffer = "";
   private abortController: AbortController | null = null;
-  private isStreaming = false;
+  private keyHandler: (key: { name: string; ctrl: boolean }) => void;
+
+  private syntaxStyle: SyntaxStyle;
 
   constructor(
-    ctx: RenderContext,
+    _ctx: unknown,               // ignored — use renderer directly
     renderer: CliRenderer,
     harness: LoadedHarness,
     sessionId: string,
-    onBack: () => void,
+    private onBack: () => void,
   ) {
-    this.ctx = ctx;
+    this.syntaxStyle = SyntaxStyle.create();
     this.renderer = renderer;
     this.sessionId = sessionId;
-    this.syntaxStyle = SyntaxStyle.create();
 
-    this.root = new BoxRenderable(ctx, {
+    // ── Scrollback surface (fills the top scroll area) ────────────────────
+    this.surface = renderer.createScrollbackSurface();
+
+    // ── Footer (3 lines): header | input | status ─────────────────────────
+    this.footer = new BoxRenderable(renderer, {
       flexDirection: "column",
       width: "100%",
       height: "100%",
     });
 
-    // ── Header ────────────────────────────────────────────────────────────────
-    const header = new BoxRenderable(ctx, {
+    // Header row
+    const header = new BoxRenderable(renderer, {
       height: 1,
-      border: ["bottom"],
-      borderColor: COLORS.cyan,
+      flexDirection: "row",
+      paddingLeft: 1,
     });
-    const headerText = new TextRenderable(ctx, {
-      content: `◆ gates  ${harness.name}  [${sessionId.slice(0, 8)}]`,
+    const headerText = new TextRenderable(renderer, {
+      content: `◆ ${harness.name}  [${sessionId.slice(0, 8)}]`,
       fg: COLORS.cyan,
+      flexGrow: 1,
+    });
+    const hint = new TextRenderable(renderer, {
+      content: "Esc voltar  Ctrl+C sair",
+      fg: COLORS.dim,
     });
     header.add(headerText);
-    this.root.add(header);
+    header.add(hint);
+    this.footer.add(header);
 
-    // ── Body ──────────────────────────────────────────────────────────────────
-    const body = new BoxRenderable(ctx, {
-      flexDirection: "column",
+    // Input row
+    const inputRow = new BoxRenderable(renderer, {
+      height: 1,
+      flexDirection: "row",
+      paddingLeft: 1,
+    });
+    const prompt = new TextRenderable(renderer, {
+      content: "❯ ",
+      fg: COLORS.cyan,
+    });
+    this.input = new InputRenderable(renderer, {
+      placeholder: "Mensagem…",
       flexGrow: 1,
     });
-
-    this.messagesBox = new ScrollBoxRenderable(ctx, {
-      flexGrow: 1,
-      scrollY: true,
-      stickyScroll: true,
-    });
-    body.add(this.messagesBox);
-
-    this.streamingText = new TextRenderable(ctx, {
-      content: "",
-      fg: COLORS.white,
-    });
-    body.add(this.streamingText);
-
-    const toolBox = new BoxRenderable(ctx, { height: 1 });
-    this.toolText = new TextRenderable(ctx, { content: "", fg: COLORS.yellow });
-    toolBox.add(this.toolText);
-    body.add(toolBox);
-
-    this.root.add(body);
-
-    // ── Footer ────────────────────────────────────────────────────────────────
-    const footer = new BoxRenderable(ctx, {
-      flexDirection: "column",
-      height: 3,
-      border: ["top"],
-      borderColor: COLORS.dim,
-    });
-
-    this.statusText = new TextRenderable(ctx, {
-      content: "ready",
-      fg: COLORS.gray,
-    });
-    footer.add(this.statusText);
-
-    this.input = new InputRenderable(ctx, {
-      placeholder: "Type a message…",
-      flexGrow: 1,
-    });
-    footer.add(this.input);
-
-    this.root.add(footer);
-
-    renderer.focusRenderable(this.input);
-
     this.input.on(InputRenderableEvents.ENTER, () => {
       const text = this.input.value.trim();
-      if (!text || this.isStreaming) return;
+      if (!text) return;
       this.input.value = "";
       void this.sendMessage(text);
     });
+    inputRow.add(prompt);
+    inputRow.add(this.input);
+    this.footer.add(inputRow);
 
+    // Status row
+    const statusRow = new BoxRenderable(renderer, { height: 1, paddingLeft: 1 });
+    this.statusText = new TextRenderable(renderer, { content: "ready", fg: COLORS.dim });
+    statusRow.add(this.statusText);
+    this.footer.add(statusRow);
+
+    renderer.root.add(this.footer);
+    this.renderer.focusRenderable(this.input);
+
+    // ── Keys ──────────────────────────────────────────────────────────────
     this.keyHandler = (key: { name: string; ctrl: boolean }) => {
       if (key.name === "escape") {
-        if (this.abortController) {
-          this.abortController.abort();
-        } else {
-          onBack();
-        }
-        return;
+        this.abortController?.abort();
+        onBack();
       }
-      // Ctrl+K reserved for kanban
+      if (key.ctrl && key.name === "c") renderer.destroy();
     };
     renderer.keyInput.on("keypress", this.keyHandler);
   }
 
-  private addMessage(role: "user" | "assistant" | "system", content: string): void {
-    const msgBox = new BoxRenderable(this.ctx, {
+  private appendMessage(role: "user" | "assistant" | "system", content: string) {
+    const ctx = this.surface.renderContext;
+    const row = new BoxRenderable(ctx, {
       flexDirection: "column",
-      paddingX: 1,
+      marginBottom: 1,
+      paddingLeft: 1,
     });
 
-    const roleLabel = new TextRenderable(this.ctx, {
-      content: role === "user" ? "you" : role === "assistant" ? "assistant" : "system",
-      fg: role === "user" ? COLORS.green : role === "assistant" ? COLORS.cyan : COLORS.yellow,
-    });
+    const label = role === "user" ? "You" : role === "assistant" ? "Agent" : "System";
+    const labelColor = role === "user" ? COLORS.cyan : role === "assistant" ? COLORS.green : COLORS.yellow;
 
-    const body = new MarkdownRenderable(this.ctx, {
+    const header = new TextRenderable(ctx, {
+      content: label,
+      fg: labelColor,
+    });
+    row.add(header);
+
+    const body = new MarkdownRenderable(ctx, {
       content,
       syntaxStyle: this.syntaxStyle,
-      streaming: false,
-      fg: COLORS.white,
+      flexGrow: 1,
     });
+    row.add(body);
 
-    msgBox.add(roleLabel);
-    msgBox.add(body);
-    this.messagesBox.add(msgBox);
+    this.surface.root.add(row);
+    this.surface.commitRows(0, this.surface.height);
   }
 
-  private handleSseEvent(type: string, d: Record<string, unknown>): void {
-    switch (type) {
-      case "thinking":
-        this.statusText.content = "pensando…";
-        break;
-      case "tool_call":
-        this.statusText.content = "chamando ferramentas…";
-        this.toolText.content = `⚙ ${d.name as string}`;
-        break;
-      case "tool_result":
-        this.toolText.content = "";
-        break;
-      case "delta":
-        this.statusText.content = "streaming…";
-        this.streamingContent += (d.text as string) ?? "";
-        this.streamingText.content = this.streamingContent;
-        break;
-      case "done":
-        this.addMessage("assistant", d.content as string);
-        this.streamingContent = "";
-        this.streamingText.content = "";
-        this.toolText.content = "";
-        this.statusText.content = "ready";
-        break;
-      case "error":
-        this.addMessage("system", `Error: ${d.message as string}`);
-        this.streamingContent = "";
-        this.streamingText.content = "";
-        this.toolText.content = "";
-        this.statusText.content = "error";
-        setTimeout(() => {
-          this.statusText.content = "ready";
-        }, 2000);
-        break;
-    }
-  }
-
-  private async sendMessage(text: string): Promise<void> {
-    this.isStreaming = true;
-    this.streamingContent = "";
-    this.sseBuffer = "";
+  private async sendMessage(text: string) {
+    this.appendMessage("user", text);
     this.statusText.content = "pensando…";
-    this.addMessage("user", text);
+    this.input.value = "";
 
-    const controller = new AbortController();
-    this.abortController = controller;
+    this.abortController = new AbortController();
+
+    // Streaming response
+    const ctx = this.surface.renderContext;
+    const msgRow = new BoxRenderable(ctx, { flexDirection: "column", marginBottom: 1, paddingLeft: 1 });
+    const agentLabel = new TextRenderable(ctx, { content: "Agent", fg: COLORS.green });
+    const md = new MarkdownRenderable(ctx, {
+      streaming: true,
+      syntaxStyle: this.syntaxStyle,
+      flexGrow: 1,
+    });
+    msgRow.add(agentLabel);
+    msgRow.add(md);
+    this.surface.root.add(msgRow);
+
+    let fullContent = "";
 
     try {
       const res = await fetch(
@@ -211,7 +171,7 @@ export class ChatScreen {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ content: text }),
-          signal: controller.signal,
+          signal: this.abortController.signal,
         },
       );
 
@@ -227,38 +187,46 @@ export class ChatScreen {
             decoder.decode(value, { stream: true }),
           );
           this.sseBuffer = buffer;
+
           for (const { type, data } of events) {
-            this.handleSseEvent(type, data as Record<string, unknown>);
+            const d = data as Record<string, unknown>;
+            if (type === "thinking") {
+              this.statusText.content = "pensando…";
+            } else if (type === "tool_call") {
+              this.statusText.content = `⟳ ${d.name as string}`;
+            } else if (type === "delta") {
+              fullContent += (d.text as string) ?? "";
+              md.content = fullContent;
+              this.surface.commitRows(0, this.surface.height);
+            } else if (type === "done") {
+              md.content = (d.content as string) ?? fullContent;
+              md.streaming = false;
+              this.surface.commitRows(0, this.surface.height);
+            }
           }
         }
       } finally {
-        // Always release the stream lock — prevents resource leak on abort or error
         reader?.cancel().catch(() => {});
       }
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
-        this.addMessage("system", `Error: ${(err as Error).message}`);
-        this.statusText.content = "error";
-        setTimeout(() => {
-          this.statusText.content = "ready";
-        }, 2000);
-      } else {
-        this.statusText.content = "ready";
+        md.content = `Error: ${(err as Error).message}`;
+        md.streaming = false;
+        this.surface.commitRows(0, this.surface.height);
       }
-      this.streamingContent = "";
-      this.streamingText.content = "";
-      this.toolText.content = "";
-    } finally {
-      this.isStreaming = false;
-      this.abortController = null;
     }
+
+    this.statusText.content = "ready";
+    this.renderer.focusRenderable(this.input);
   }
 
+  // root is not used in split-footer — surface + footer are separate
+  get root(): BoxRenderable { return this.footer; }
+
   destroy(): void {
+    this.abortController?.abort();
     this.renderer.keyInput.off("keypress", this.keyHandler);
-    if (this.abortController) {
-      this.abortController.abort();
-    }
-    this.root.destroy();
+    this.surface.destroy();
+    this.footer.destroy();
   }
 }
