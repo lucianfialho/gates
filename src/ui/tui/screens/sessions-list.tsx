@@ -38,7 +38,7 @@ export function SessionsList({ onResume, onBack }: Props) {
     fetch(`http://localhost:${DEFAULT_PORT}/api/sessions`)
       .then((r) => r.json())
       .then((data: unknown) => {
-        setSessions(data as SessionInfo[]);
+        setSessions(Array.isArray(data) ? (data as SessionInfo[]) : []);
         setLoading(false);
       })
       .catch(() => setLoading(false));

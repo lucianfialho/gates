@@ -88,7 +88,8 @@ export function App({ harnesses }: Props) {
       });
       const data = await res.json() as { sessionId?: string; error?: string };
       if (data.error) throw new Error(data.error);
-      const harness = harnesses.find((h) => h.name === harnessName) ?? DEFAULT_HARNESS;
+      const harness = harnesses.find((h) => h.name === harnessName);
+      if (!harness) throw new Error(`Harness "${harnessName}" not found — was it renamed or deleted?`);
       setSelectedHarness(harness);
       setSessionId(data.sessionId!);
       setScreen("chat");

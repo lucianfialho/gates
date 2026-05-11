@@ -218,17 +218,22 @@ export class ChatScreen {
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
 
-      while (reader) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const { buffer, events } = parseSseChunk(
-          this.sseBuffer,
-          decoder.decode(value, { stream: true }),
-        );
-        this.sseBuffer = buffer;
-        for (const { type, data } of events) {
-          this.handleSseEvent(type, data as Record<string, unknown>);
+      try {
+        while (reader) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const { buffer, events } = parseSseChunk(
+            this.sseBuffer,
+            decoder.decode(value, { stream: true }),
+          );
+          this.sseBuffer = buffer;
+          for (const { type, data } of events) {
+            this.handleSseEvent(type, data as Record<string, unknown>);
+          }
         }
+      } finally {
+        // Always release the stream lock — prevents resource leak on abort or error
+        reader?.cancel().catch(() => {});
       }
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
