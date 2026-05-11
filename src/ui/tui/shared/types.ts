@@ -1,47 +1,34 @@
-export type EventHandler<T = unknown> = (event: T) => void;
-
-export interface Dimensions {
-  width: number;
-  height: number;
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  timestamp: number;
+  streaming?: boolean;
 }
 
-export interface Position {
-  x: number;
-  y: number;
+export interface ToolCallItem {
+  id: string;
+  name: string;
+  args: string;
+  output?: string;
+  isError?: boolean;
+  status: "running" | "done" | "error";
 }
 
-export type Align = 'left' | 'center' | 'right';
-
-export type BorderStyle = 'single' | 'double' | 'rounded' | 'none';
-
-export type ScrollDirection = 'up' | 'down' | 'none';
-
-export interface LayoutRegion {
-  position: Position;
-  dimensions: Dimensions;
+export interface KanbanFinding {
+  id: string;
+  title: string;
+  file: string | null;
+  line: number | null;
+  snippet: string | null;
+  body: string;
+  severity: "high" | "medium" | "low";
+  labels: string[];
 }
 
-export interface RenderContext {
-  dimensions: Dimensions;
-  cursor: Position;
-  scrollOffset: number;
-}
-
-export type ComponentState = 'active' | 'inactive' | 'hidden' | 'focused';
-
-export interface InputEvent {
-  type: 'key' | 'mouse' | 'resize';
-  key?: string;
-  mouseButton?: number;
-  mouseX?: number;
-  mouseY?: number;
-  newWidth?: number;
-  newHeight?: number;
-}
-
-export interface WidgetConfig {
-  id?: string;
-  visible?: boolean;
-  border?: BorderStyle;
-  padding?: number;
+export interface ThinkingBlockData {
+  id: string;
+  text: string;
+  durationMs: number;
+  collapsed: boolean;
 }
