@@ -19,12 +19,6 @@ const LEFT_BORDER = {
   leftT: " ", rightT: " ", cross: " ",
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  "todo": "TODO",
-  "in-progress": "IN PROGRESS",
-  "done": "DONE",
-};
-
 const SEVERITY_COLORS: Record<string, string> = {
   high: "#ff5555",
   medium: "#ffff55",
@@ -35,8 +29,7 @@ export class CardView {
   root: BoxRenderable;
   private renderer: CliRenderer;
   private syntaxStyle: SyntaxStyle;
-  private keyHandler: (key: { name: string; ctrl: boolean; shift: boolean }) => void;
-
+  private keyHandler: (key: { name: string; ctrl: boolean }) => void;
   private chatInput: InputRenderable;
   private chatMessagesBox: ScrollBoxRenderable;
   private chatStatusText: TextRenderable;
@@ -55,6 +48,7 @@ export class CardView {
 
     const W = process.stdout.columns ?? 80;
     const H = process.stdout.rows ?? 24;
+    const sevColor = SEVERITY_COLORS[card.severity] ?? "#888888";
 
     this.root = new BoxRenderable(renderer, {
       flexDirection: "column",
@@ -62,108 +56,89 @@ export class CardView {
       height: H,
     });
 
-    const onResize = () => {
-      (this.root as BoxRenderable & { width: number; height: number }).width = process.stdout.columns ?? 80;
-      (this.root as BoxRenderable & { width: number; height: number }).height = process.stdout.rows ?? 24;
-    };
-    process.stdout.on("resize", onResize);
-
-    // ── Header ────────────────────────────────────────────────────────────
-    const header = new BoxRenderable(renderer, {
-      height: 1,
-      flexDirection: "row",
-      paddingLeft: 1,
-      paddingRight: 1,
-      border: ["bottom"],
-      borderColor: "#333333",
+    process.stdout.on("resize", () => {
+      (this.root as unknown as { width: number; height: number }).width  = process.stdout.columns ?? 80;
+      (this.root as unknown as { width: number; height: number }).height = process.stdout.rows ?? 24;
     });
 
-    const truncatedTitle = card.title.length > 40 ? card.title.slice(0, 40) : card.title;
-    const statusLabel = STATUS_LABELS[card.status] ?? card.status;
-    const sevColor = SEVERITY_COLORS[card.severity] ?? "#888888";
+    // ── Header (2 rows) ──────────────────────────────────────────────────
+    const header = new BoxRenderable(renderer, {
+      height: 2,
+      flexDirection: "column",
+      paddingLeft: 2,
+    });
 
     const breadcrumb = new TextRenderable(renderer, {
-      content: `◆ gates  ›  ${truncatedTitle}   ${statusLabel}  ●  ${card.severity}`,
+      content: `◆ gates  ›  ${card.title.slice(0, 50)}`,
       fg: "#cccccc",
     });
-    header.add(breadcrumb);
 
-    // Severity color indicator
-    const sevIndicator = new TextRenderable(renderer, {
-      content: `  [${card.severity}]`,
+    const meta = new TextRenderable(renderer, {
+      content: `${card.status.toUpperCase()}  ●  ${card.severity}` +
+               (card.file ? `   📄 ${card.file}${card.line != null ? `:${card.line}` : ""}` : ""),
       fg: sevColor,
     });
-    header.add(sevIndicator);
 
+    header.add(breadcrumb);
+    header.add(meta);
     this.root.add(header);
 
-    // ── Card content area ─────────────────────────────────────────────────
-    const contentHeight = Math.floor(H * 0.45);
-    const cardContent = new ScrollBoxRenderable(renderer, {
-      height: contentHeight,
+    // ── Separator ────────────────────────────────────────────────────────
+    const sep1 = new TextRenderable(renderer, { content: "─".repeat(W), fg: "#333333" });
+    this.root.add(sep1);
+
+    // ── Card body (fixed height ~40% of screen) ───────────────────────
+    const bodyHeight = Math.max(4, Math.floor(H * 0.38));
+    const cardScroll = new ScrollBoxRenderable(renderer, {
+      height: bodyHeight,
       scrollY: true,
     });
 
-    // Title
-    const titleText = new TextRenderable(renderer, {
-      content: card.title,
-      fg: "#ffffff",
-      attributes: 1,
-      paddingLeft: 2,
+    // Body as markdown
+    const bodyBox = new BoxRenderable(renderer, {
+      flexDirection: "column",
+      paddingLeft: 3,
+      paddingRight: 2,
       paddingTop: 1,
+      paddingBottom: 1,
     });
-    cardContent.add(titleText);
-
-    // Body
     const bodyMd = new MarkdownRenderable(renderer, {
       content: card.body,
       syntaxStyle: this.syntaxStyle,
-      paddingLeft: 2,
-      paddingTop: 1,
     });
-    cardContent.add(bodyMd);
+    bodyBox.add(bodyMd);
+    cardScroll.add(bodyBox);
 
-    // File reference
-    if (card.file) {
-      const fileLine = card.line != null ? `${card.file}:${card.line}` : card.file;
-      const fileRef = new TextRenderable(renderer, {
-        content: `📄 ${fileLine}`,
-        fg: "#555555",
-        paddingLeft: 2,
-        paddingTop: 1,
-      });
-      cardContent.add(fileRef);
-    }
-
-    // Snippet
+    // Snippet (if any)
     if (card.snippet) {
-      const snippetLines = card.snippet.split("\n").map(l => `┃ ${l}`).join("\n");
-      const snippetText = new TextRenderable(renderer, {
-        content: snippetLines,
-        fg: "#555555",
-        paddingLeft: 4,
-        paddingTop: 1,
+      const snippetBox = new BoxRenderable(renderer, {
+        flexDirection: "column",
+        paddingLeft: 3,
+        paddingBottom: 1,
+        border: ["left"],
+        customBorderChars: LEFT_BORDER,
+        borderColor: sevColor,
       });
-      cardContent.add(snippetText);
+      const snippetText = new TextRenderable(renderer, {
+        content: card.snippet,
+        fg: "#888888",
+      });
+      snippetBox.add(snippetText);
+      cardScroll.add(snippetBox);
     }
 
-    this.root.add(cardContent);
+    this.root.add(cardScroll);
 
-    // ── Divider ────────────────────────────────────────────────────────────
-    const divider = new TextRenderable(renderer, {
-      content: "─".repeat(W),
-      fg: "#333333",
-    });
-    this.root.add(divider);
+    // ── Separator ────────────────────────────────────────────────────────
+    const sep2 = new TextRenderable(renderer, { content: "─".repeat(W), fg: "#333333" });
+    this.root.add(sep2);
 
-    // ── Chat area ─────────────────────────────────────────────────────────
+    // ── Chat area (remaining space) ───────────────────────────────────
     const chatArea = new BoxRenderable(renderer, {
       flexDirection: "column",
       flexGrow: 1,
     });
-    this.root.add(chatArea);
 
-    // Chat history
     this.chatMessagesBox = new ScrollBoxRenderable(renderer, {
       flexGrow: 1,
       scrollY: true,
@@ -172,13 +147,16 @@ export class CardView {
     });
     chatArea.add(this.chatMessagesBox);
 
-    // Input box
+    // Input
     const inputBox = new BoxRenderable(renderer, {
+      flexShrink: 0,
+      flexDirection: "row",
       border: ["left"],
       customBorderChars: LEFT_BORDER,
       borderColor: "#4a9eff",
       paddingLeft: 2,
       paddingRight: 1,
+      marginLeft: 2,
     });
     this.chatInput = new InputRenderable(renderer, {
       placeholder: "sobre esta task…",
@@ -193,188 +171,131 @@ export class CardView {
     inputBox.add(this.chatInput);
     chatArea.add(inputBox);
 
-    // Hints row
+    // Hints
     const hintsRow = new BoxRenderable(renderer, {
       height: 1,
       flexDirection: "row",
       paddingLeft: 2,
       justifyContent: "space-between",
+      flexShrink: 0,
     });
-    this.chatStatusText = new TextRenderable(renderer, {
-      content: "",
-      fg: "#888888",
-    });
+    this.chatStatusText = new TextRenderable(renderer, { content: "", fg: "#888888" });
     const hints = new TextRenderable(renderer, {
-      content: "esc voltar  i criar issue  /fix implementa",
+      content: "esc voltar  i issue  /fix implementa",
       fg: "#555555",
     });
     hintsRow.add(this.chatStatusText);
     hintsRow.add(hints);
     chatArea.add(hintsRow);
 
+    this.root.add(chatArea);
+
     renderer.focusRenderable(this.chatInput);
-
-    // ── Keys ─────────────────────────────────────────────────────────────
-    this.keyHandler = (key: { name: string; ctrl: boolean; shift: boolean }) => {
+    renderer.keyInput.on("keypress", this.keyHandler = (key) => {
       if (key.ctrl && key.name === "c") { renderer.destroy(); return; }
-      if (key.name === "escape") { this.abortController?.abort(); onBack(); return; }
-    };
-    renderer.keyInput.on("keypress", this.keyHandler);
+      if (key.name === "escape") { this.abortController?.abort(); onBack(); }
+    });
 
-    // Initialize session
     void this.initSession();
   }
 
   private async initSession(): Promise<void> {
     if (this.card.chatSessionId) {
       this.sessionId = this.card.chatSessionId;
-      // Load history
       try {
         const res = await fetch(`http://localhost:${DEFAULT_PORT}/api/sessions/${this.sessionId}/history`);
         if (res.ok) {
           const data = await res.json() as { messages?: Array<{ role: string; content: string }> };
           for (const msg of data.messages ?? []) {
             if (msg.role === "user" || msg.role === "assistant") {
-              this.addMessage(msg.role as "user" | "assistant", msg.content);
+              this.addChatMessage(msg.role as "user" | "assistant", msg.content);
             }
           }
         }
-      } catch {
-        // ignore history load errors
-      }
+      } catch { /* ignore */ }
       return;
     }
-
-    // Create a new session
     try {
       const res = await fetch(`http://localhost:${DEFAULT_PORT}/api/default-session`, { method: "POST" });
       const data = await res.json() as { sessionId: string };
       this.sessionId = data.sessionId;
       kanbanStore.setSessionId(this.card.id, this.sessionId);
       this.card.chatSessionId = this.sessionId;
-    } catch {
-      // session creation failed
-    }
+    } catch { /* ignore */ }
   }
 
-  private addMessage(role: "user" | "assistant", content: string): void {
+  private addChatMessage(role: "user" | "assistant", content: string): void {
     const row = new BoxRenderable(this.renderer, {
       flexDirection: "column",
       paddingLeft: 2,
       paddingRight: 2,
       paddingTop: 1,
-      paddingBottom: 1,
       border: role === "assistant" ? ["left"] : false,
       customBorderChars: role === "assistant" ? LEFT_BORDER : undefined,
       borderColor: role === "assistant" ? "#4a9eff" : undefined,
     });
-
-    const label = new TextRenderable(this.renderer, {
+    row.add(new TextRenderable(this.renderer, {
       content: role === "user" ? "You" : "gates",
       fg: role === "user" ? "#00d4ff" : "#4a9eff",
       attributes: 1,
-    });
-    row.add(label);
-
-    const body = new MarkdownRenderable(this.renderer, {
+    }));
+    row.add(new MarkdownRenderable(this.renderer, {
       content,
       syntaxStyle: this.syntaxStyle,
-      paddingTop: 1,
-    });
-    row.add(body);
+    }));
     this.chatMessagesBox.add(row);
-  }
-
-  private buildCardContext(userMessage: string): string {
-    const context = `[CARD: ${this.card.title}\nfile: ${this.card.file ?? "N/A"}:${this.card.line ?? ""}\nseverity: ${this.card.severity}\n${this.card.body.slice(0, 500)}]`;
-    return `${context}\n\n${userMessage}`;
   }
 
   private async sendMessage(text: string): Promise<void> {
-    if (!this.sessionId) {
-      this.addMessage("assistant", "Aguardando sessão…");
-      return;
-    }
+    if (!this.sessionId) return;
 
-    this.addMessage("user", text);
+    this.addChatMessage("user", text);
     this.chatStatusText.content = "thinking…";
     this.abortController = new AbortController();
 
-    const contextualMessage = this.buildCardContext(text);
+    const context = `[TASK: ${this.card.title} | ${this.card.severity} | ${this.card.file ?? ""}${this.card.line != null ? `:${this.card.line}` : ""}\n${this.card.body.slice(0, 400)}]\n\n${text}`;
 
     const row = new BoxRenderable(this.renderer, {
       flexDirection: "column",
-      paddingLeft: 2,
-      paddingRight: 2,
-      paddingTop: 1,
-      paddingBottom: 1,
-      border: ["left"],
-      customBorderChars: LEFT_BORDER,
-      borderColor: "#4a9eff",
+      paddingLeft: 2, paddingRight: 2, paddingTop: 1,
+      border: ["left"], customBorderChars: LEFT_BORDER, borderColor: "#4a9eff",
     });
-    const label = new TextRenderable(this.renderer, {
-      content: "gates",
-      fg: "#4a9eff",
-      attributes: 1,
-    });
+    row.add(new TextRenderable(this.renderer, { content: "gates", fg: "#4a9eff", attributes: 1 }));
     const md = new MarkdownRenderable(this.renderer, {
-      content: "",
-      streaming: true,
-      syntaxStyle: this.syntaxStyle,
-      paddingTop: 1,
+      content: "", streaming: true, syntaxStyle: this.syntaxStyle,
     });
-    row.add(label);
     row.add(md);
     this.chatMessagesBox.add(row);
 
-    let fullContent = "";
+    let full = "";
     try {
-      const res = await fetch(
-        `http://localhost:${DEFAULT_PORT}/api/sessions/${this.sessionId}/chat`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: contextualMessage }),
-          signal: this.abortController.signal,
-        },
-      );
-
+      const res = await fetch(`http://localhost:${DEFAULT_PORT}/api/sessions/${this.sessionId}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: context }),
+        signal: this.abortController.signal,
+      });
       const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
+      const dec = new TextDecoder();
       try {
         while (reader) {
           const { done, value } = await reader.read();
           if (done) break;
-          const { buffer, events } = parseSseChunk(this.sseBuffer, decoder.decode(value, { stream: true }));
+          const { buffer, events } = parseSseChunk(this.sseBuffer, dec.decode(value, { stream: true }));
           this.sseBuffer = buffer;
           for (const { type, data } of events) {
             const d = data as Record<string, unknown>;
-            if (type === "delta") {
-              fullContent += (d.text as string) ?? "";
-              md.content = fullContent;
-            } else if (type === "done") {
-              const finalContent = (d.content as string) ?? fullContent;
-              md.content = finalContent;
-              md.streaming = false;
-            } else if (type === "tool_call") {
-              this.chatStatusText.content = `⟳ ${d.name as string}`;
-            } else if (type === "tool_result") {
-              this.chatStatusText.content = "thinking…";
-            }
+            if (type === "delta") { full += (d.text as string) ?? ""; md.content = full; }
+            else if (type === "done") { md.content = (d.content as string) ?? full; md.streaming = false; }
+            else if (type === "tool_call") this.chatStatusText.content = `⟳ ${d.name as string}`;
+            else if (type === "tool_result") this.chatStatusText.content = "thinking…";
           }
         }
-      } finally {
-        reader?.cancel().catch(() => {});
-      }
+      } finally { reader?.cancel().catch(() => {}); }
     } catch (err) {
-      if ((err as Error).name !== "AbortError") {
-        md.content = `Error: ${(err as Error).message}`;
-        md.streaming = false;
-      } else {
-        md.streaming = false;
-      }
+      if ((err as Error).name !== "AbortError") { md.content = `Error: ${(err as Error).message}`; }
+      md.streaming = false;
     }
-
     this.chatStatusText.content = "";
     this.renderer.focusRenderable(this.chatInput);
   }
