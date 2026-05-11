@@ -849,6 +849,7 @@ export function createServer(harnesses: LoadedHarness[], serverTools?: ServerToo
             provider: reviewProvider,
             tools: allTools,
             systemPromptSuffix: serverTools?.connectorDocs ?? "",
+            maxToolIterations: 30,  // code review needs more iterations than default (15)
           });
           reg.register(codeReviewHarness.name, codeReviewHarness.def as import("@gatesai/runtime").FunctionalHarnessDef);
           return reg;
