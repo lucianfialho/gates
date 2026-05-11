@@ -209,7 +209,6 @@ export class CardView {
     hintsRow.add(new TextRenderable(renderer, { content: "i issue  /fix  /test", fg: "#444444" }));
     this.root.add(hintsRow);
 
-    renderer.root.add(this.root);
     renderer.focusRenderable(this.chatInput);
 
     renderer.keyInput.on("keypress", this.keyHandler = (key) => {

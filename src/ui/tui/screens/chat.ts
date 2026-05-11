@@ -127,7 +127,6 @@ export class ChatScreen {
     inputArea.add(statusLine);
     this.root.add(inputArea);
 
-    renderer.root.add(this.root);
     renderer.focusRenderable(this.input);
 
     // ── Keys ─────────────────────────────────────────────────────────────
