@@ -9,8 +9,7 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "jsx": "react-jsx",
-    "jsxImportSource": "react"
+    "types": ["bun-types"]
   },
   "include": ["src/**/*"]
 }
