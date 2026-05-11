@@ -42,12 +42,23 @@ export class ChatScreen {
     this.sessionId = sessionId;
     this.syntaxStyle = SyntaxStyle.create();
 
-    // ── Root: full screen column ──────────────────────────────────────────
+    // ── Root: full screen column ─────────────────────────────────────────
+    // Use explicit terminal dimensions — "100%" doesn't resolve without
+    // a fixed parent. Listen to resize and update accordingly.
+    const W = process.stdout.columns ?? 80;
+    const H = process.stdout.rows ?? 24;
+
     this.root = new BoxRenderable(renderer, {
       flexDirection: "column",
-      width: "100%",
-      height: "100%",
+      width: W,
+      height: H,
     });
+
+    const onResize = () => {
+      (this.root as BoxRenderable & { width: number; height: number }).width = process.stdout.columns ?? 80;
+      (this.root as BoxRenderable & { width: number; height: number }).height = process.stdout.rows ?? 24;
+    };
+    process.stdout.on("resize", onResize);
 
     // ── Messages: scrollbox sticks to bottom ──────────────────────────────
     this.messagesBox = new ScrollBoxRenderable(renderer, {
@@ -252,6 +263,7 @@ export class ChatScreen {
   destroy(): void {
     this.abortController?.abort();
     this.renderer.keyInput.off("keypress", this.keyHandler);
+    process.stdout.removeAllListeners("resize");
     this.root.destroy();
   }
 }

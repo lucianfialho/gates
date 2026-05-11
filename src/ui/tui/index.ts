@@ -7,7 +7,7 @@ export async function startTUI(harnesses: LoadedHarness[]): Promise<void> {
     targetFps: 60,
     useMouse: true,
     exitOnCtrlC: false,
-    externalOutputMode: "passthrough",  // inline, same as OpenCode
+    screenMode: "alternate-screen",  // full terminal takeover — dimensions are known
   });
   renderer.start();
   const router = new AppRouter(renderer, harnesses);
