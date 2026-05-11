@@ -4,11 +4,10 @@ import { AppRouter } from "./router.js";
 
 export async function startTUI(harnesses: LoadedHarness[]): Promise<void> {
   const renderer = await createCliRenderer({
-    targetFps: 30,
-    useMouse: false,
+    targetFps: 60,
+    useMouse: true,
     exitOnCtrlC: false,
-    screenMode: "split-footer",   // scrollback area + fixed footer for input
-    footerHeight: 3,
+    externalOutputMode: "passthrough",  // inline, same as OpenCode
   });
   renderer.start();
   const router = new AppRouter(renderer, harnesses);

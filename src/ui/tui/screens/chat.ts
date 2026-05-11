@@ -4,163 +4,190 @@ import {
   InputRenderable,
   InputRenderableEvents,
   MarkdownRenderable,
+  ScrollBoxRenderable,
   SyntaxStyle,
 } from "@opentui/core";
-import type { CliRenderer, ScrollbackSurface } from "@opentui/core";
+import type { CliRenderer } from "@opentui/core";
 import type { LoadedHarness } from "../../harness/loader.js";
 import { DEFAULT_PORT } from "../../server/index.js";
 import { parseSseChunk } from "../shared/sse.js";
-import { COLORS } from "../shared/colors.js";
+
+// Left-only ┃ border — same visual separator as OpenCode
+const LEFT_BORDER = {
+  topLeft: " ", topRight: " ", bottomLeft: " ", bottomRight: " ",
+  horizontal: " ", vertical: "┃", topT: " ", bottomT: " ",
+  leftT: " ", rightT: " ", cross: " ",
+};
 
 export class ChatScreen {
-  // split-footer layout:
-  //   scrollback surface  ← messages stream here (scrollable)
-  //   footer (3 lines)    ← header + input + status
-
-  private surface: ScrollbackSurface;
-  private footer: BoxRenderable;   // lives in renderer.root (footer area)
+  root: BoxRenderable;
+  private renderer: CliRenderer;
+  private syntaxStyle: SyntaxStyle;
+  private messagesBox: ScrollBoxRenderable;
   private input: InputRenderable;
   private statusText: TextRenderable;
-
-  private renderer: CliRenderer;
   private sessionId: string;
   private sseBuffer = "";
   private abortController: AbortController | null = null;
-  private keyHandler: (key: { name: string; ctrl: boolean }) => void;
-
-  private syntaxStyle: SyntaxStyle;
+  private keyHandler: (key: { name: string; ctrl: boolean; shift: boolean }) => void;
 
   constructor(
-    _ctx: unknown,               // ignored — use renderer directly
+    _ctx: unknown,
     renderer: CliRenderer,
     harness: LoadedHarness,
     sessionId: string,
     private onBack: () => void,
   ) {
-    this.syntaxStyle = SyntaxStyle.create();
     this.renderer = renderer;
     this.sessionId = sessionId;
+    this.syntaxStyle = SyntaxStyle.create();
 
-    // ── Scrollback surface (fills the top scroll area) ────────────────────
-    this.surface = renderer.createScrollbackSurface();
-
-    // ── Footer (3 lines): header | input | status ─────────────────────────
-    this.footer = new BoxRenderable(renderer, {
+    // ── Root: full screen column ──────────────────────────────────────────
+    this.root = new BoxRenderable(renderer, {
       flexDirection: "column",
       width: "100%",
       height: "100%",
     });
 
-    // Header row
-    const header = new BoxRenderable(renderer, {
-      height: 1,
-      flexDirection: "row",
-      paddingLeft: 1,
-    });
-    const headerText = new TextRenderable(renderer, {
-      content: `◆ ${harness.name}  [${sessionId.slice(0, 8)}]`,
-      fg: COLORS.cyan,
+    // ── Messages: scrollbox sticks to bottom ──────────────────────────────
+    this.messagesBox = new ScrollBoxRenderable(renderer, {
       flexGrow: 1,
+      scrollY: true,
+      stickyScroll: true,
+      stickyStart: "bottom",
     });
-    const hint = new TextRenderable(renderer, {
-      content: "Esc voltar  Ctrl+C sair",
-      fg: COLORS.dim,
-    });
-    header.add(headerText);
-    header.add(hint);
-    this.footer.add(header);
+    this.root.add(this.messagesBox);
 
-    // Input row
-    const inputRow = new BoxRenderable(renderer, {
-      height: 1,
-      flexDirection: "row",
-      paddingLeft: 1,
+    // ── Input area ────────────────────────────────────────────────────────
+    const inputArea = new BoxRenderable(renderer, {
+      flexShrink: 0,
+      flexDirection: "column",
+      paddingLeft: 2,
+      paddingRight: 2,
+      paddingTop: 1,
     });
-    const prompt = new TextRenderable(renderer, {
-      content: "❯ ",
-      fg: COLORS.cyan,
+
+    // Input box with left ┃ accent border
+    const inputBox = new BoxRenderable(renderer, {
+      border: ["left"],
+      customBorderChars: LEFT_BORDER,
+      borderColor: "#4a9eff",
+      paddingLeft: 2,
+      paddingRight: 1,
+      paddingTop: 1,
+      paddingBottom: 1,
     });
+
     this.input = new InputRenderable(renderer, {
-      placeholder: "Mensagem…",
+      placeholder: "Message gates…",
       flexGrow: 1,
     });
+
     this.input.on(InputRenderableEvents.ENTER, () => {
       const text = this.input.value.trim();
       if (!text) return;
       this.input.value = "";
       void this.sendMessage(text);
     });
-    inputRow.add(prompt);
-    inputRow.add(this.input);
-    this.footer.add(inputRow);
 
-    // Status row
-    const statusRow = new BoxRenderable(renderer, { height: 1, paddingLeft: 1 });
-    this.statusText = new TextRenderable(renderer, { content: "ready", fg: COLORS.dim });
-    statusRow.add(this.statusText);
-    this.footer.add(statusRow);
+    inputBox.add(this.input);
+    inputArea.add(inputBox);
 
-    renderer.root.add(this.footer);
-    this.renderer.focusRenderable(this.input);
+    // Status line below input
+    const statusLine = new BoxRenderable(renderer, {
+      height: 1,
+      paddingLeft: 3,
+      flexDirection: "row",
+      justifyContent: "space-between",
+    });
 
-    // ── Keys ──────────────────────────────────────────────────────────────
-    this.keyHandler = (key: { name: string; ctrl: boolean }) => {
-      if (key.name === "escape") {
-        this.abortController?.abort();
-        onBack();
-      }
+    this.statusText = new TextRenderable(renderer, {
+      content: `${harness.name}`,
+      fg: "#888888",
+    });
+
+    const hint = new TextRenderable(renderer, {
+      content: "esc back  ctrl+c quit",
+      fg: "#555555",
+    });
+
+    statusLine.add(this.statusText);
+    statusLine.add(hint);
+    inputArea.add(statusLine);
+    this.root.add(inputArea);
+
+    renderer.root.add(this.root);
+    renderer.focusRenderable(this.input);
+
+    // ── Keys ─────────────────────────────────────────────────────────────
+    this.keyHandler = (key: { name: string; ctrl: boolean; shift: boolean }) => {
+      if (key.name === "escape") { this.abortController?.abort(); onBack(); }
       if (key.ctrl && key.name === "c") renderer.destroy();
     };
     renderer.keyInput.on("keypress", this.keyHandler);
   }
 
-  private appendMessage(role: "user" | "assistant" | "system", content: string) {
-    const ctx = this.surface.renderContext;
-    const row = new BoxRenderable(ctx, {
+  private addMessage(role: "user" | "assistant" | "system", content: string) {
+    const row = new BoxRenderable(this.renderer, {
       flexDirection: "column",
-      marginBottom: 1,
-      paddingLeft: 1,
+      paddingLeft: 2,
+      paddingRight: 2,
+      paddingTop: 1,
+      paddingBottom: 1,
+      border: role === "assistant" ? ["left"] : false,
+      customBorderChars: role === "assistant" ? LEFT_BORDER : undefined,
+      borderColor: role === "assistant" ? "#4a9eff" : undefined,
     });
 
-    const label = role === "user" ? "You" : role === "assistant" ? "Agent" : "System";
-    const labelColor = role === "user" ? COLORS.cyan : role === "assistant" ? COLORS.green : COLORS.yellow;
-
-    const header = new TextRenderable(ctx, {
-      content: label,
-      fg: labelColor,
+    const label = new TextRenderable(this.renderer, {
+      content: role === "user" ? "You" : role === "assistant" ? "gates" : "·",
+      fg: role === "user" ? "#00d4ff" : role === "assistant" ? "#4a9eff" : "#888888",
+      attributes: 1, // bold
     });
-    row.add(header);
+    row.add(label);
 
-    const body = new MarkdownRenderable(ctx, {
+    const body = new MarkdownRenderable(this.renderer, {
       content,
       syntaxStyle: this.syntaxStyle,
-      flexGrow: 1,
+      paddingTop: 1,
     });
     row.add(body);
-
-    this.surface.root.add(row);
-    this.surface.commitRows(0, this.surface.height);
+    this.messagesBox.add(row);
   }
 
   private async sendMessage(text: string) {
-    this.appendMessage("user", text);
-    this.statusText.content = "pensando…";
-    this.input.value = "";
-
+    this.addMessage("user", text);
+    this.statusText.content = "thinking…";
     this.abortController = new AbortController();
 
-    // Streaming response
-    const ctx = this.surface.renderContext;
-    const msgRow = new BoxRenderable(ctx, { flexDirection: "column", marginBottom: 1, paddingLeft: 1 });
-    const agentLabel = new TextRenderable(ctx, { content: "Agent", fg: COLORS.green });
-    const md = new MarkdownRenderable(ctx, {
+    // Add streaming assistant message
+    const row = new BoxRenderable(this.renderer, {
+      flexDirection: "column",
+      paddingLeft: 2,
+      paddingRight: 2,
+      paddingTop: 1,
+      paddingBottom: 1,
+      border: ["left"],
+      customBorderChars: LEFT_BORDER,
+      borderColor: "#4a9eff",
+    });
+
+    const label = new TextRenderable(this.renderer, {
+      content: "gates",
+      fg: "#4a9eff",
+      attributes: 1,
+    });
+
+    const md = new MarkdownRenderable(this.renderer, {
+      content: "",
       streaming: true,
       syntaxStyle: this.syntaxStyle,
-      flexGrow: 1,
+      paddingTop: 1,
     });
-    msgRow.add(agentLabel);
-    msgRow.add(md);
-    this.surface.root.add(msgRow);
+
+    row.add(label);
+    row.add(md);
+    this.messagesBox.add(row);
 
     let fullContent = "";
 
@@ -191,17 +218,18 @@ export class ChatScreen {
           for (const { type, data } of events) {
             const d = data as Record<string, unknown>;
             if (type === "thinking") {
-              this.statusText.content = "pensando…";
+              this.statusText.content = "thinking…";
             } else if (type === "tool_call") {
               this.statusText.content = `⟳ ${d.name as string}`;
+            } else if (type === "tool_result") {
+              this.statusText.content = "thinking…";
             } else if (type === "delta") {
               fullContent += (d.text as string) ?? "";
               md.content = fullContent;
-              this.surface.commitRows(0, this.surface.height);
             } else if (type === "done") {
-              md.content = (d.content as string) ?? fullContent;
+              const finalContent = (d.content as string) ?? fullContent;
+              md.content = finalContent;
               md.streaming = false;
-              this.surface.commitRows(0, this.surface.height);
             }
           }
         }
@@ -212,7 +240,8 @@ export class ChatScreen {
       if ((err as Error).name !== "AbortError") {
         md.content = `Error: ${(err as Error).message}`;
         md.streaming = false;
-        this.surface.commitRows(0, this.surface.height);
+      } else {
+        md.streaming = false;
       }
     }
 
@@ -220,13 +249,9 @@ export class ChatScreen {
     this.renderer.focusRenderable(this.input);
   }
 
-  // root is not used in split-footer — surface + footer are separate
-  get root(): BoxRenderable { return this.footer; }
-
   destroy(): void {
     this.abortController?.abort();
     this.renderer.keyInput.off("keypress", this.keyHandler);
-    this.surface.destroy();
-    this.footer.destroy();
+    this.root.destroy();
   }
 }
